@@ -6,6 +6,9 @@ import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime
 from sqlalchemy import create_engine
+from flask import Flask
+from waitress import serve # type: ignore
+
 
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -71,8 +74,11 @@ df = pd.read_sql_query(query, engine)
 # Close the connection
 engine.dispose()
 
+# Create a Flask server instance
+server = Flask(__name__)
+
 # Create the Dash app
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, server=server)
 
 # Define the custom color scale
 custom_colorscale = [
@@ -457,5 +463,6 @@ def update_output(selected_hotel, selected_channels, selected_rooms, click_data,
 
     return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options
 
+
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8000, host='0.0.0.0')
+        serve(server, host='0.0.0.0', port=8000)

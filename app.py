@@ -457,6 +457,5 @@ def update_output(selected_hotel, selected_channels, selected_rooms, click_data,
 
     return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options
 
-
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True, port=8000, host='0.0.0.0')

@@ -9,7 +9,6 @@ from sqlalchemy import create_engine
 from flask import Flask
 from waitress import serve # type: ignore
 
-
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -38,7 +37,8 @@ SELECT
     b.created_date::date AS created_date,
     h.hotel_id,
     b.booking_channel_name, 
-    r."name" AS room_name,  -- Include room_name in the query
+    r."name" AS room_name,
+    b.room_number,  -- Include room_name in the query
     COUNT(b.booking_reference) AS number_of_bookings,
     SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
 FROM
@@ -60,6 +60,7 @@ GROUP BY
     b.created_date::date,
     h.name,
     h.hotel_id,
+    b.room_number,
     b.booking_channel_name,
     r."name" 
     
@@ -114,7 +115,6 @@ def create_heatmap(df, title, colorscale, zmin=None, zmax=None):
         hovertemplate=(
             'Booking Date: %{y}<br>' +
             'Stay Date: %{x}<br>' +
-            'Booking Channels: %{customdata[0]}<br>' +
             'Total Number of Bookings: %{z}<br>' +
             'Total Revenue: %{customdata[1]:.2f}'
         ),
@@ -128,69 +128,71 @@ def create_heatmap(df, title, colorscale, zmin=None, zmax=None):
         title={
             'text': title,
             'font': {
-                'size': 20,  # Title font size
-                'color': 'black',  # Title font color
-                'family': 'Arial',  # Title font family
-                'weight': 'bold'  # Title font weight
+                'size': 20,
+                'color': 'black',
+                'family': 'Arial',
+                'weight': 'bold'
             },
-            'x': 0.5,  # Title x position (centered)
-            'xanchor': 'center'  # Title x anchor
+            'x': 0.5,
+            'xanchor': 'center'
         },
         xaxis_title={
             'text': 'Stay Date',
             'font': {
-                'size': 16,  # X-axis title font size
-                'color': 'black',  # X-axis title font color
-                'family': 'Arial'  # X-axis title font family
+                'size': 16,
+                'color': 'black',
+                'family': 'Arial'
             }
         },
         yaxis_title={
             'text': 'Booking Date',
             'font': {
-                'size': 16,  # Y-axis title font size
-                'color': 'black',  # Y-axis title font color
-                'family': 'Arial'  # Y-axis title font family
+                'size': 16,
+                'color': 'black',
+                'family': 'Arial'
             }
         },
         plot_bgcolor='white',
         paper_bgcolor='white',
-        width=800,  # Set chart width
-        height=800,  # Set chart height
+        width=2000,
+        height=800,
         xaxis=dict(
-            scaleanchor='y'
+            scaleanchor='y',
+            tickfont=dict(size=18)
         ),
         yaxis=dict(
-            scaleratio=1,
-            scaleanchor='x'
+             # Format y-axis labels as "Month Day" (e.g., "Jun 10")
+            tickfont=dict(size=18),
+            showticklabels=True
         ),
     )
     
     return fig
 
 
-def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms):
+def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_room_numbers):
     channel_filter = f"AND b.booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
+    room_number_filter = f"AND b.room_number IN ({', '.join(f'\'{number}\'' for number in selected_room_numbers)})" if selected_room_numbers else ""
     
     detail_query = f"""
     SELECT
-        dt."date" AS stay_date,
+        dt."date"::date AS stay_date,
         b.created_date::date,
         b.booking_reference,
-        COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END)) AS total_revenue,
+        ROUND(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END)), 2) AS total_revenue,
+        COUNT(b.booking_reference) AS number_of_bookings,
         COUNT(b.booking_reference) AS number_of_bookings,
         b.booking_status,
         EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
         b.booking_channel_name,
         r."name" AS room_name,
+        b.room_number,
         b.check_in,
         b.check_out,
         b.rate_plan_code,
         h."name",
-        CASE 
-            WHEN b.check_out > b.check_in THEN (b.check_out - b.check_in)::integer
-            ELSE 0
-        END AS NumberOfNights
+        b.nights
     FROM
         booking b
     JOIN
@@ -203,11 +205,12 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     LEFT OUTER JOIN 
         booking_rate br ON b.booking_id=br.booking_rate_id
     WHERE
-        dt."date" = '{stay_date}'
+        dt."date"::date = '{stay_date}'
         AND b.created_date = '{created_date}'
         AND b.hotel_id = {selected_hotel}
         {channel_filter}
         {room_filter}
+        {room_number_filter}
     GROUP BY
         dt."date",
         b.created_date::date,
@@ -216,6 +219,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         b.check_out, b.booking_reference,
         br.total_revenue, b.total_revenue,
         b.nights,
+        b.room_number,
         h."name",
         r."name",
         b.booking_status
@@ -271,7 +275,7 @@ app.layout = html.Div([
 
     html.Div([
         html.Div([
-            html.Div("Stay Date:", style={'font-weight': 'bold', 'margin-bottom': '5px'}),
+            html.Div("Stay Date:", style={'font-weight': 'bold', 'margin-bottom': '5px', 'fontSize': '20px',  'fontFamily': 'Arial'}),
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
@@ -279,7 +283,7 @@ app.layout = html.Div([
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
-            html.Div("Booking Date:", style={'font-weight': 'bold', 'margin-bottom': '5px'}),
+            html.Div("Booking Date:", style={'font-weight': 'bold', 'margin-bottom': '5px', 'fontSize': '20px',  'fontFamily': 'Arial'}),
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
@@ -325,6 +329,18 @@ app.layout = html.Div([
             'fontFamily': 'Arial',  # Font family
             'color': 'black'  # Font color
         }
+    ),
+    dcc.Dropdown(
+        id='room-number-dropdown',
+        options=[],  # Initially empty
+        value=[],  # Default to an empty list (no channels selected)
+        multi=True,
+        style={
+            'width': '100%', 
+            'fontSize': '20px',  # Font size
+            'fontFamily': 'Arial',  # Font family
+            'color': 'black'  # Font color
+        }
     )
 ], style={'width': '65%', 'display': 'inline-block', 'padding': '10px'})
 ,
@@ -332,42 +348,42 @@ app.layout = html.Div([
     ], style={'padding': '20px'}),
 
     html.Div([
-        html.Div([
-            dcc.Graph(id='heatmap'),
-        ], style={'width': '30%', 'display': 'inline-block'}),
+    html.Div([
+        dcc.Graph(id='heatmap'),
+    ], style={'width': '100%'}),
 
-        html.Div([
-            html.H2('Booking Details'),
-            dash_table.DataTable(
-                id='booking-details',
-                columns=[
-                    {'name': 'Booking Reference', 'id': 'booking_reference'},
-                    {'name': 'Booking Status', 'id': 'booking_status'},
-                    {'name': 'Room Name', 'id': 'room_name'},
-                    {'name': 'Lead In', 'id': 'date_difference'},
-                    {'name': 'Stay Date', 'id': 'stay_date'},
-                    {'name': 'Booking Date', 'id': 'created_date'},
-                    {'name': 'Hotel Name', 'id': 'name'},
-                    {'name': 'Booking channel', 'id': 'booking_channel_name'},
-                    {'name': 'Check-in Date', 'id': 'check_in'},
-                    {'name': 'Check-out Date', 'id': 'check_out'},
-                    {'name': 'Rate Plan', 'id': 'rate_plan_code'},
-                    {'name': 'Number of Nights', 'id': 'number_of_bookings'},
-                    {'name': 'Total Revenue', 'id': 'total_revenue'},
-                ],
-                style_table={'overflowX': 'auto', 'fontSize': 14},
-                style_cell={'textAlign': 'left', 'padding': '5px', 'fontSize': '18px'},
-                style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18},
-                style_data_conditional=[
-                    {
-                        'if': {'row_index': 'odd'},
-                        'backgroundColor': 'rgb(248, 248, 248)',
-                    },
-                ],
-                style_as_list_view=True
-            )
-        ], style={'width': '60%', 'display': 'inline-block', 'padding': '10px'}),
-    ], style={'display': 'flex', 'justify-content': 'space-evenly', 'flex-direction': 'row-reverse'}),
+    html.Div([
+        html.H2('Booking Details'),
+        dash_table.DataTable(
+            id='booking-details',
+            columns=[
+                {'name': 'Booking Reference', 'id': 'booking_reference'},
+                {'name': 'Booking Status', 'id': 'booking_status'},
+                {'name': 'Room Name', 'id': 'room_name'},
+                {'name': 'Room No.', 'id': 'room_number'},
+                {'name': 'Lead In', 'id': 'date_difference'},
+                {'name': 'Stay Date', 'id': 'stay_date'},
+                {'name': 'Booking Date', 'id': 'created_date'},
+                {'name': 'Total Revenue', 'id': 'total_revenue'},
+                {'name': 'Booking channel', 'id': 'booking_channel_name'},
+                {'name': 'Check-in Date', 'id': 'check_in'},
+                {'name': 'Check-out Date', 'id': 'check_out'},
+                {'name': 'Rate Plan', 'id': 'rate_plan_code'},
+                {'name': 'Number of Nights', 'id': 'nights'},
+            ],
+            style_table={'overflowX': 'auto', 'fontSize': 14},
+            style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right':'10px', 'fontSize': '18px'},
+            style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right':'10px'},
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': 'rgb(248, 248, 248)',
+                },
+            ],
+            style_as_list_view=True
+        )
+    ], style={'width': '100%', 'padding': '10px'}),
+], style={'display': 'flex', 'flex-direction': 'column'}),
 
     html.Hr(),
 
@@ -385,10 +401,12 @@ from datetime import datetime
      Output('booking-details', 'data'),
      Output('bar-chart', 'figure'),
      Output('channel-dropdown', 'options'),
-     Output('room-dropdown', 'options')],
+     Output('room-dropdown', 'options'),
+     Output('room-number-dropdown', 'options')],
     [Input('hotel-dropdown', 'value'),
      Input('channel-dropdown', 'value'),
      Input('room-dropdown', 'value'),
+     Input('room-number-dropdown', 'value'),
      Input('heatmap', 'clickData'),
      Input('heatmap', 'relayoutData'),
      Input('stay-date-picker', 'start_date'),
@@ -396,7 +414,7 @@ from datetime import datetime
      Input('created-date-picker', 'start_date'),
      Input('created-date-picker', 'end_date')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, click_data, relayout_data, stay_date_start, stay_date_end, created_date_start, created_date_end):
+def update_output(selected_hotel, selected_channels, selected_rooms, selected_room_numbers, click_data, relayout_data, stay_date_start, stay_date_end, created_date_start, created_date_end):
     # Convert date strings to datetime.date objects
     stay_date_start = datetime.strptime(stay_date_start, '%Y-%m-%d').date() if stay_date_start else None
     stay_date_end = datetime.strptime(stay_date_end, '%Y-%m-%d').date() if stay_date_end else None
@@ -419,6 +437,26 @@ def update_output(selected_hotel, selected_channels, selected_rooms, click_data,
     if created_date_start and created_date_end:
         filtered_df = filtered_df[(filtered_df['created_date'] >= created_date_start) & (filtered_df['created_date'] <= created_date_end)]
 
+    # Update room type dropdown options
+    if 'room_name' in filtered_df.columns:
+        rooms = filtered_df['room_name'].dropna().unique()
+        room_options = [{'label': room, 'value': room} for room in rooms]
+    else:
+        room_options = []
+
+    # Filter the DataFrame further based on selected room types
+    if selected_rooms:
+        filtered_df = filtered_df[filtered_df['room_name'].isin(selected_rooms)]
+
+    # Update room number dropdown options based on selected room types
+    if 'room_number' in filtered_df.columns:
+        room_numbers = filtered_df['room_number'].dropna().unique()
+        # Sort room numbers and remove empty values
+        sorted_room_numbers = sorted([number for number in room_numbers if number])
+        room_number_options = [{'label': number, 'value': number} for number in sorted_room_numbers]
+    else:
+        room_number_options = []
+
     # Update channel dropdown options
     if 'booking_channel_name' in filtered_df.columns and not filtered_df['booking_channel_name'].isnull().all():
         channels = filtered_df['booking_channel_name'].dropna().unique()
@@ -426,43 +464,49 @@ def update_output(selected_hotel, selected_channels, selected_rooms, click_data,
     else:
         channel_options = []
 
-    # Update room dropdown options
-    if 'room_name' in filtered_df.columns:
-        rooms = filtered_df['room_name'].dropna().unique()
-        room_options = [{'label': room, 'value': room} for room in rooms]
-    else:
-        room_options = []
-
-    # Apply filters for selected channels and rooms
+    # Apply filters for selected channels
     if selected_channels:
         filtered_df = filtered_df[filtered_df['booking_channel_name'].isin(selected_channels)]
-    if selected_rooms:
-        filtered_df = filtered_df[filtered_df['room_name'].isin(selected_rooms)]
 
     # Create heatmap figure
     heatmap_fig = create_heatmap(filtered_df, title='Hotel Booking Heatmap', colorscale=custom_colorscale)
-    
-    # Check if there is relayoutData (zoom or pan) and preserve it
+
+    # Highlight the clicked point on the heatmap
+    if click_data:
+        stay_date = click_data['points'][0]['x']
+        created_date = click_data['points'][0]['y']
+
+        # Update the trace with a highlighted point
+        heatmap_fig.add_trace(go.Scatter(
+            x=[stay_date],
+            y=[created_date],
+            mode='markers',
+            marker=dict(
+                color='black',
+                size=15,
+                symbol='x',
+                line=dict(color='red', width=2)  # Adding a red border around the point
+            ),
+            showlegend=False
+        ))
+
+        # Fetch booking details
+        booking_details_df = fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels if selected_channels else [], selected_rooms if selected_rooms else [], selected_room_numbers if selected_room_numbers else [])
+        booking_details_data = booking_details_df.to_dict('records')
+    else:
+        booking_details_data = []
+
+    # Preserve layout changes if any (e.g., zoom or pan)
     if relayout_data:
         if 'xaxis.range[0]' in relayout_data and 'xaxis.range[1]' in relayout_data:
             heatmap_fig.update_xaxes(range=[relayout_data['xaxis.range[0]'], relayout_data['xaxis.range[1]']])
         if 'yaxis.range[0]' in relayout_data and 'yaxis.range[1]' in relayout_data:
             heatmap_fig.update_yaxes(range=[relayout_data['yaxis.range[0]'], relayout_data['yaxis.range[1]']])
 
-    # Fetch booking details if heatmap is clicked
-    if click_data:
-        stay_date = click_data['points'][0]['x']
-        created_date = click_data['points'][0]['y']
-        booking_details_df = fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels if selected_channels else [], selected_rooms if selected_rooms else [])
-        booking_details_data = booking_details_df.to_dict('records')
-    else:
-        booking_details_data = []
-
     # Create bar chart
     bar_chart_fig = create_bar_chart(filtered_df)
 
-    return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options
-
+    return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options, room_number_options
 
 if __name__ == '__main__':
         serve(server, host='0.0.0.0', port=8000)

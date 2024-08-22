@@ -7,7 +7,9 @@ import numpy as np
 from datetime import datetime
 from sqlalchemy import create_engine
 from flask import Flask
+import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+
 
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -36,9 +38,10 @@ SELECT
     h."name",
     b.created_date::date AS created_date,
     h.hotel_id,
-    b.booking_channel_name, 
+    b.booking_channel_name,
+    b.booking_status, 
     r."name" AS room_name,
-    b.room_number,  -- Include room_name in the query
+    b.rate_plan_code,  -- Include room_name in the query
     COUNT(b.booking_reference) AS number_of_bookings,
     SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
 FROM
@@ -60,7 +63,8 @@ GROUP BY
     b.created_date::date,
     h.name,
     h.hotel_id,
-    b.room_number,
+    b.rate_plan_code,
+    b.booking_status,
     b.booking_channel_name,
     r."name" 
     
@@ -78,8 +82,10 @@ engine.dispose()
 # Create a Flask server instance
 server = Flask(__name__)
 
+
+
 # Create the Dash app
-app = dash.Dash(__name__, server=server)
+app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Define the custom color scale
 custom_colorscale = [
@@ -170,11 +176,11 @@ def create_heatmap(df, title, colorscale, zmin=None, zmax=None):
     return fig
 
 
-def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_room_numbers):
+def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status):
     channel_filter = f"AND b.booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
-    room_number_filter = f"AND b.room_number IN ({', '.join(f'\'{number}\'' for number in selected_room_numbers)})" if selected_room_numbers else ""
-    
+    rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
+    book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
     detail_query = f"""
     SELECT
         dt."date"::date AS stay_date,
@@ -210,7 +216,8 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         AND b.hotel_id = {selected_hotel}
         {channel_filter}
         {room_filter}
-        {room_number_filter}
+        {rate_plan_filter}
+        {book_status_filter}
     GROUP BY
         dt."date",
         b.created_date::date,
@@ -259,7 +266,6 @@ def create_bar_chart(df):
     return fig
 
 # Layout of the Dash app
-# Layout of the Dash app
 app.layout = html.Div([
     html.H1(
         'Opera Dashboard',
@@ -305,7 +311,8 @@ app.layout = html.Div([
             'fontFamily': 'Arial',  # Font family
             'color': 'black'  # Font color
         },
-        clearable=False
+            clearable=False,
+            placeholder='Select a hotel'
     ),
     dcc.Dropdown(
         id='channel-dropdown',
@@ -318,7 +325,8 @@ app.layout = html.Div([
             'fontSize': '20px',  # Font size
             'fontFamily': 'Arial',  # Font family
             'color': 'black'  # Font color
-        }
+        },
+            placeholder='Select booking channels'
     ),
     dcc.Dropdown(
         id='room-dropdown',
@@ -326,12 +334,28 @@ app.layout = html.Div([
         style={
             'width': '100%', 
             'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',  # Font family
+            'fontFamily': 'Arial',
+            'marginBottom': '10px',   # Font family
             'color': 'black'  # Font color
-        }
+        },
+        placeholder='Select room types'
     ),
     dcc.Dropdown(
-        id='room-number-dropdown',
+        id='rate-dropdown',
+        options=[],  # Initially empty
+        value=[],  # Default to an empty list (no channels selected)
+        multi=True,
+        style={
+            'width': '100%', 
+            'fontSize': '20px',  # Font size
+            'fontFamily': 'Arial',
+            'marginBottom': '10px',  # Font family
+            'color': 'black'  # Font color
+        },
+        placeholder='Select rate codes'  # Placeholder text
+    ),
+    dcc.Dropdown(
+        id='book-dropdown',
         options=[],  # Initially empty
         value=[],  # Default to an empty list (no channels selected)
         multi=True,
@@ -340,7 +364,8 @@ app.layout = html.Div([
             'fontSize': '20px',  # Font size
             'fontFamily': 'Arial',  # Font family
             'color': 'black'  # Font color
-        }
+        },
+        placeholder='Select Booking Status'  # Placeholder text
     )
 ], style={'width': '65%', 'display': 'inline-block', 'padding': '10px'})
 ,
@@ -402,11 +427,13 @@ from datetime import datetime
      Output('bar-chart', 'figure'),
      Output('channel-dropdown', 'options'),
      Output('room-dropdown', 'options'),
-     Output('room-number-dropdown', 'options')],
+     Output('rate-dropdown', 'options'),
+     Output('book-dropdown', 'options')],
     [Input('hotel-dropdown', 'value'),
      Input('channel-dropdown', 'value'),
      Input('room-dropdown', 'value'),
-     Input('room-number-dropdown', 'value'),
+     Input('rate-dropdown', 'value'),
+     Input('book-dropdown', 'value'),
      Input('heatmap', 'clickData'),
      Input('heatmap', 'relayoutData'),
      Input('stay-date-picker', 'start_date'),
@@ -414,7 +441,7 @@ from datetime import datetime
      Input('created-date-picker', 'start_date'),
      Input('created-date-picker', 'end_date')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, selected_room_numbers, click_data, relayout_data, stay_date_start, stay_date_end, created_date_start, created_date_end):
+def update_output(selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, click_data, relayout_data, stay_date_start, stay_date_end, created_date_start, created_date_end):
     # Convert date strings to datetime.date objects
     stay_date_start = datetime.strptime(stay_date_start, '%Y-%m-%d').date() if stay_date_start else None
     stay_date_end = datetime.strptime(stay_date_end, '%Y-%m-%d').date() if stay_date_end else None
@@ -449,13 +476,16 @@ def update_output(selected_hotel, selected_channels, selected_rooms, selected_ro
         filtered_df = filtered_df[filtered_df['room_name'].isin(selected_rooms)]
 
     # Update room number dropdown options based on selected room types
-    if 'room_number' in filtered_df.columns:
-        room_numbers = filtered_df['room_number'].dropna().unique()
+    if 'rate_plan_code' in filtered_df.columns:
+        rate_code = filtered_df['rate_plan_code'].dropna().unique()
         # Sort room numbers and remove empty values
-        sorted_room_numbers = sorted([number for number in room_numbers if number])
-        room_number_options = [{'label': number, 'value': number} for number in sorted_room_numbers]
+        sorted_rate_code = sorted([rate for rate in rate_code if rate])
+        rate_options = [{'label': rate, 'value': rate} for rate in sorted_rate_code]
     else:
-        room_number_options = []
+        rate_options = []
+
+    if selected_rate_plan:
+        filtered_df = filtered_df[filtered_df['rate_plan_code'].isin(selected_rate_plan)]
 
     # Update channel dropdown options
     if 'booking_channel_name' in filtered_df.columns and not filtered_df['booking_channel_name'].isnull().all():
@@ -467,6 +497,16 @@ def update_output(selected_hotel, selected_channels, selected_rooms, selected_ro
     # Apply filters for selected channels
     if selected_channels:
         filtered_df = filtered_df[filtered_df['booking_channel_name'].isin(selected_channels)]
+    
+    if 'booking_status' in filtered_df.columns and not filtered_df['booking_status'].isnull().all():
+        bookingstatus = filtered_df['booking_status'].dropna().unique()
+        book_options = [{'label': book, 'value': book} for book in bookingstatus]
+    else:
+        book_options = []
+
+    # Apply filters for selected channels
+    if selected_booking_status:
+        filtered_df = filtered_df[filtered_df['booking_status'].isin(selected_booking_status)]
 
     # Create heatmap figure
     heatmap_fig = create_heatmap(filtered_df, title='Hotel Booking Heatmap', colorscale=custom_colorscale)
@@ -491,7 +531,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, selected_ro
         ))
 
         # Fetch booking details
-        booking_details_df = fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels if selected_channels else [], selected_rooms if selected_rooms else [], selected_room_numbers if selected_room_numbers else [])
+        booking_details_df = fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels if selected_channels else [], selected_rooms if selected_rooms else [], selected_rate_plan if selected_rate_plan else [], selected_booking_status if selected_booking_status else [])
         booking_details_data = booking_details_df.to_dict('records')
     else:
         booking_details_data = []
@@ -506,7 +546,9 @@ def update_output(selected_hotel, selected_channels, selected_rooms, selected_ro
     # Create bar chart
     bar_chart_fig = create_bar_chart(filtered_df)
 
-    return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options, room_number_options
+    return heatmap_fig, booking_details_data, bar_chart_fig, channel_options, room_options, rate_options, book_options
+
 
 if __name__ == '__main__':
+    
         serve(server, host='0.0.0.0', port=8000)

@@ -12,7 +12,6 @@ import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
 
 
-
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -329,143 +328,164 @@ app.layout = html.Div([
             )
         ], style={'width': '30%', 'display': 'inline-block', 'padding': '10px'}),
 
-       html.Div([
-    dcc.Dropdown(
-        id='hotel-dropdown',
-        options=hotel_options,
-        value=hotel_options[0]['value'],  # Default value
-        style={
-            'width': '100%', 
-            'marginBottom': '10px', 
-            'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',  # Font family
-            'color': 'black'  # Font color
-        },
-            clearable=False,
-            placeholder='Select a hotel'
-    ),
-    dcc.Dropdown(
-        id='channel-dropdown',
-        options=[],  # Initially empty
-        value=[],  # Default to an empty list (no channels selected)
-        multi=True,  # Enable multi-select
-        style={
-            'width': '100%', 
-            'marginBottom': '10px', 
-            'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',  # Font family
-            'color': 'black'  # Font color
-        },
-            placeholder='Select booking channels'
-    ),
-    dcc.Dropdown(
-        id='room-dropdown',
-        multi=True,
-        style={
-            'width': '100%', 
-            'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',
-            'marginBottom': '10px',   # Font family
-            'color': 'black'  # Font color
-        },
-        placeholder='Select room types'
-    ),
-    dcc.Dropdown(
-        id='rate-dropdown',
-        options=[],  # Initially empty
-        value=[],  # Default to an empty list (no channels selected)
-        multi=True,
-        style={
-            'width': '100%', 
-            'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',
-            'marginBottom': '10px',  # Font family
-            'color': 'black'  # Font color
-        },
-        placeholder='Select rate codes'  # Placeholder text
-    ),
-    dcc.Dropdown(
-        id='book-dropdown',
-        options=[],  # Initially empty
-        value=[],  # Default to an empty list (no channels selected)
-        multi=True,
-        style={
-            'width': '100%', 
-            'fontSize': '20px',  # Font size
-            'fontFamily': 'Arial',  # Font family
-            'color': 'black'  # Font color
-        },
-        placeholder='Select Booking Status'  # Placeholder text
-    )
-], style={'width': '65%', 'display': 'inline-block', 'padding': '10px'})
-,
+        html.Div([
+            dcc.Dropdown(
+                id='hotel-dropdown',
+                options=hotel_options,
+                value=hotel_options[0]['value'],  # Default value
+                style={
+                    'width': '100%', 
+                    'marginBottom': '10px', 
+                    'fontSize': '20px',  # Font size
+                    'fontFamily': 'Arial',  # Font family
+                    'color': 'black'  # Font color
+                },
+                clearable=False,
+                placeholder='Select a hotel'
+            ),
+            dcc.Dropdown(
+                id='channel-dropdown',
+                options=[],  # Initially empty
+                value=[],  # Default to an empty list (no channels selected)
+                multi=True,  # Enable multi-select
+                style={
+                    'width': '100%', 
+                    'marginBottom': '10px', 
+                    'fontSize': '20px',  # Font size
+                    'fontFamily': 'Arial',  # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select booking channels'
+            ),
+            dcc.Dropdown(
+                id='room-dropdown',
+                multi=True,
+                style={
+                    'width': '100%', 
+                    'fontSize': '20px',  # Font size
+                    'fontFamily': 'Arial',
+                    'marginBottom': '10px',   # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select room types'
+            ),
+            dcc.Dropdown(
+                id='rate-dropdown',
+                options=[],  # Initially empty
+                value=[],  # Default to an empty list (no channels selected)
+                multi=True,
+                style={
+                    'width': '100%', 
+                    'fontSize': '20px',  # Font size
+                    'fontFamily': 'Arial',
+                    'marginBottom': '10px',  # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select rate codes'  # Placeholder text
+            ),
+            dcc.Dropdown(
+                id='book-dropdown',
+                options=[],  # Initially empty
+                value=[],  # Default to an empty list (no channels selected)
+                multi=True,
+                style={
+                    'width': '100%', 
+                    'fontSize': '20px',  # Font size
+                    'fontFamily': 'Arial',  # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select Booking Status'  # Placeholder text
+            )
+        ], style={'width': '65%', 'display': 'inline-block', 'padding': '10px'}),
 
     ], style={'padding': '20px'}),
 
     html.Div([
-    html.Div([
-        dcc.Graph(id='heatmap'),
+        dcc.Loading(
+            id="loading-heatmap",
+            type="circle",
+            children=[
+                dcc.Graph(id='heatmap')
+            ]
+        ),
     ], style={'width': '100%'}),
 
     html.Div([
         html.H2('Booking Details'),
-        dash_table.DataTable(
-            id='booking-details',
-            columns=[
-                {'name': 'Booking Reference', 'id': 'booking_reference'},
-                {'name': 'Booking Status', 'id': 'booking_status'},
-                {'name': 'Room Name', 'id': 'room_name'},
-                {'name': 'Lead In', 'id': 'date_difference'},
-                {'name': 'Cancel Date', 'id': 'cancel_date'},
-                {'name': 'Stay Date', 'id': 'stay_date'},
-                {'name': 'Booking Date', 'id': 'created_date'},
-                {'name': 'Total Revenue', 'id': 'total_revenue'},
-                {'name': 'Booking channel', 'id': 'booking_channel_name'},
-                {'name': 'Check-in Date', 'id': 'check_in'},
-                {'name': 'Check-out Date', 'id': 'check_out'},
-                {'name': 'Rate Plan', 'id': 'rate_plan_code'},
-            ],
-            style_table={'overflowX': 'auto', 'fontSize': 14},
-            style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right':'10px', 'fontSize': '18px'},
-            style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right':'10px'},
-            style_data_conditional=[
-                {
-                    'if': {'row_index': 'odd'},
-                    'backgroundColor': 'rgb(248, 248, 248)',
-                },
-            ],
-            style_as_list_view=True
+        dcc.Loading(
+            id="loading-booking-details",
+            type="circle",
+            children=[
+                dash_table.DataTable(
+                    id='booking-details',
+                    columns=[
+                        {'name': 'Booking Reference', 'id': 'booking_reference'},
+                        {'name': 'Booking Status', 'id': 'booking_status'},
+                        {'name': 'Room Name', 'id': 'room_name'},
+                        {'name': 'Lead In', 'id': 'date_difference'},
+                        {'name': 'Cancel Date', 'id': 'cancel_date'},
+                        {'name': 'Stay Date', 'id': 'stay_date'},
+                        {'name': 'Booking Date', 'id': 'created_date'},
+                        {'name': 'Total Revenue', 'id': 'total_revenue'},
+                        {'name': 'Booking channel', 'id': 'booking_channel_name'},
+                        {'name': 'Check-in Date', 'id': 'check_in'},
+                        {'name': 'Check-out Date', 'id': 'check_out'},
+                        {'name': 'Rate Plan', 'id': 'rate_plan_code'},
+                    ],
+                    style_table={'overflowX': 'auto', 'fontSize': 14},
+                    style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right':'10px', 'fontSize': '18px'},
+                    style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right':'10px'},
+                    style_data_conditional=[
+                        {
+                            'if': {'row_index': 'odd'},
+                            'backgroundColor': 'rgb(248, 248, 248)',
+                        },
+                    ],
+                    style_as_list_view=True
+                )
+            ]
         )
     ], style={'width': '100%', 'padding': '10px'}),
-], style={'display': 'flex', 'flex-direction': 'column'}),
 
-        html.Div([
+    html.Div([
         html.H2('Additional Booking Details'),
-        dash_table.DataTable(
-            id='additional-details',
-            columns=[
-                {'name': 'First Name', 'id': 'first_name'},
-                {'name': 'Last Name', 'id': 'last_name'},
-                {'name': 'Room Number', 'id': 'room_number'},
-                {'name': 'Email', 'id': 'email'},
-                {'name': 'Market Code', 'id': 'market_code'},
-            ],
-            style_table={'overflowX': 'auto', 'fontSize': 14},
-            style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
-            style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
-            style_data_conditional=[
-                {
-                    'if': {'row_index': 'odd'},
-                    'backgroundColor': 'rgb(248, 248, 248)',
-                },
-            ],
-            style_as_list_view=True
+        dcc.Loading(
+            id="loading-additional-details",
+            type="circle",
+            children=[
+                dash_table.DataTable(
+                    id='additional-details',
+                    columns=[
+                        {'name': 'First Name', 'id': 'first_name'},
+                        {'name': 'Last Name', 'id': 'last_name'},
+                        {'name': 'Room Number', 'id': 'room_number'},
+                        {'name': 'Email', 'id': 'email'},
+                        {'name': 'Market Code', 'id': 'market_code'},
+                    ],
+                    style_table={'overflowX': 'auto', 'fontSize': 14},
+                    style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
+                    style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
+                    style_data_conditional=[
+                        {
+                            'if': {'row_index': 'odd'},
+                            'backgroundColor': 'rgb(248, 248, 248)',
+                        },
+                    ],
+                    style_as_list_view=True
+                )
+            ]
         )
     ], style={'width': '100%', 'padding': '10px'}),
 
     html.Hr(),
 
-    dcc.Graph(id='bar-chart'),
+    dcc.Loading(
+        id="loading-bar-chart",
+        type="circle",
+        children=[
+            dcc.Graph(id='bar-chart')
+        ]
+    ),
 
     html.Div(id='hover-data', style={'display': 'none'})  # Placeholder for hover data
     

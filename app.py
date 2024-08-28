@@ -536,6 +536,7 @@ from datetime import datetime
      Input('rate-dropdown', 'value'),
      Input('book-dropdown', 'value'),
      Input('booking_heatmap', 'clickData'),
+     Input('revenue_heatmap', 'clickData'),
      Input('booking_heatmap', 'relayoutData'),
      Input('revenue_heatmap', 'relayoutData'),
      Input('stay-date-picker', 'start_date'),
@@ -543,7 +544,7 @@ from datetime import datetime
      Input('created-date-picker', 'start_date'),
      Input('created-date-picker', 'end_date')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, click_data, booking_relayout, revenue_relayout, stay_date_start, stay_date_end, created_date_start, created_date_end):
+def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, booking_click_data, revenue_click_data, booking_relayout, revenue_relayout, stay_date_start, stay_date_end, created_date_start, created_date_end):
     # Default values
     booking_heatmap = go.Figure()
     revenue_heatmap = go.Figure()
@@ -632,12 +633,37 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         revenue_heatmap.update_xaxes(range=x_range)
         revenue_heatmap.update_yaxes(range=y_range)
 
-    # Highlight clicked point on the booking heatmap
-    if click_data:
-        stay_date = click_data['points'][0]['x']
-        created_date = click_data['points'][0]['y']
+    # Handle marker synchronization
+    marker_data = None
+    if booking_click_data:
+        stay_date = booking_click_data['points'][0]['x']
+        created_date = booking_click_data['points'][0]['y']
+        marker_data = {'stay_date': stay_date, 'created_date': created_date}
+    elif revenue_click_data:
+        stay_date = revenue_click_data['points'][0]['x']
+        created_date = revenue_click_data['points'][0]['y']
+        marker_data = {'stay_date': stay_date, 'created_date': created_date}
 
+    if marker_data:
+        stay_date = marker_data['stay_date']
+        created_date = marker_data['created_date']
+
+        # Update markers on booking heatmap
         booking_heatmap.add_trace(go.Scatter(
+            x=[stay_date],
+            y=[created_date],
+            mode='markers',
+            marker=dict(
+                color='black',
+                size=15,
+                symbol='x',
+                line=dict(color='red', width=2)
+            ),
+            showlegend=False
+        ))
+
+        # Update markers on revenue heatmap
+        revenue_heatmap.add_trace(go.Scatter(
             x=[stay_date],
             y=[created_date],
             mode='markers',
@@ -691,6 +717,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
     # Return updated components
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
+
 
 if __name__ == '__main__':
         serve(server, host='0.0.0.0', port=8000)

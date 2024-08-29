@@ -11,6 +11,7 @@ import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
 
+
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -43,7 +44,7 @@ SELECT
     r."name" AS room_name,
     b.rate_plan_code,  -- Include room_name in the query
     COUNT(b.booking_reference) AS number_of_bookings,
-    sum(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
+    SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
 FROM
     booking b
 JOIN
@@ -178,8 +179,8 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
             tickfont=dict(size=18),
             type='category',
             showgrid=False,
-            categoryarray=complete_date_range_str,
             gridcolor='LightGray',
+            categoryarray=complete_date_range_str,
             gridwidth=1          
         ),
         yaxis=dict(
@@ -237,7 +238,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
     detail_query = f"""
     SELECT
-        dt."date"::date AS stay_date, min(rh.amount) as amount,
+        dt."date"::date AS stay_date,
         b.created_date::date,
         b.cancel_date::date,
         b.booking_reference,
@@ -267,7 +268,9 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         booking_rate br ON b.booking_id=br.booking_rate_id
     JOIN
     rate_history rh on rh.hotel_id = b.hotel_id and rh.stay_date = dt."date"
+
     join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id 
+
     WHERE
         dt."date"::date = '{stay_date}'
         AND b.created_date = '{created_date}'
@@ -325,7 +328,7 @@ def create_bar_chart(df):
     return fig
 
 # Layout of the Dash app
-app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
+app.layout = dbc.Container([
     dbc.Row([
         dbc.Col(html.H1("Hotel Booking Dashboard"), width={"size": 6, "offset": 4})
     ]),
@@ -335,7 +338,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-12-31',
+                end_date='2024-07-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -346,7 +349,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-12-31',
+                end_date='2024-07-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -448,8 +451,8 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                     id='booking-details',
                     columns=[
                         {'name': 'Booking Reference', 'id': 'booking_reference'},
-                        {'name': 'Booking Status', 'id': 'booking_status'},
                         {'name': 'Selling Rate', 'id': 'amount'},
+                        {'name': 'Booking Status', 'id': 'booking_status'},
                         {'name': 'Room Name', 'id': 'room_name'},
                         {'name': 'Room Code', 'id': 'code'},
                         {'name': 'Lead In', 'id': 'date_difference'},
@@ -488,6 +491,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                     columns=[
                         {'name': 'First Name', 'id': 'first_name'},
                         {'name': 'Last Name', 'id': 'last_name'},
+                        {'name': 'Selling Rate', 'id': 'amount'},
                         {'name': 'Room Number', 'id': 'room_number'},
                         {'name': 'Email', 'id': 'email'},
                         {'name': 'Market Code', 'id': 'market_code'},
@@ -522,7 +526,6 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
 ], fluid=True)
 # Updated callback function to handle room_name filter and preserve layout changes
 from datetime import datetime
-
 @app.callback(
     [Output('booking_heatmap', 'figure'),
      Output('revenue_heatmap', 'figure'),

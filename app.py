@@ -11,7 +11,6 @@ import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
 
-
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -44,7 +43,7 @@ SELECT
     r."name" AS room_name,
     b.rate_plan_code,  -- Include room_name in the query
     COUNT(b.booking_reference) AS number_of_bookings,
-    SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
+    sum(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
 FROM
     booking b
 JOIN
@@ -236,7 +235,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
     detail_query = f"""
     SELECT
-        dt."date"::date AS stay_date,
+        dt."date"::date AS stay_date, min(rh.amount) as amount,
         b.created_date::date,
         b.cancel_date::date,
         b.booking_reference,
@@ -264,6 +263,8 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
     LEFT OUTER JOIN 
         booking_rate br ON b.booking_id=br.booking_rate_id
+    JOIN
+    rate_history rh on rh.hotel_id = b.hotel_id and rh.stay_date = dt."date"
 
     WHERE
         dt."date"::date = '{stay_date}'
@@ -322,7 +323,7 @@ def create_bar_chart(df):
     return fig
 
 # Layout of the Dash app
-app.layout = dbc.Container([
+app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
     dbc.Row([
         dbc.Col(html.H1("Hotel Booking Dashboard"), width={"size": 6, "offset": 4})
     ]),
@@ -446,6 +447,7 @@ app.layout = dbc.Container([
                     columns=[
                         {'name': 'Booking Reference', 'id': 'booking_reference'},
                         {'name': 'Booking Status', 'id': 'booking_status'},
+                        {'name': 'Selling Rate', 'id': 'amount'},
                         {'name': 'Room Name', 'id': 'room_name'},
                         {'name': 'Room Code', 'id': 'code'},
                         {'name': 'Lead In', 'id': 'date_difference'},

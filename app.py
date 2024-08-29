@@ -171,7 +171,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
         },
         xaxis_title='Stay Date',
         yaxis_title='Booking Date',
-        plot_bgcolor='violet',
+        plot_bgcolor='white',
         paper_bgcolor='white',
         height=800,
         xaxis=dict(
@@ -203,7 +203,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
         },
         xaxis_title='Stay Date',
         yaxis_title='Booking Date',
-        plot_bgcolor='violet',
+        plot_bgcolor='white',
         paper_bgcolor='white',
         height=800,
         xaxis=dict(

@@ -333,7 +333,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-07-31',
+                end_date='2024-12-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -344,7 +344,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-07-31',
+                end_date='2024-12-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),

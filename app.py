@@ -265,7 +265,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         booking_rate br ON b.booking_id=br.booking_rate_id
     JOIN
     rate_history rh on rh.hotel_id = b.hotel_id and rh.stay_date = dt."date"
-
+    join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id 
     WHERE
         dt."date"::date = '{stay_date}'
         AND b.created_date = '{created_date}'

@@ -177,7 +177,8 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
         xaxis=dict(
             tickfont=dict(size=18),
             type='category',
-            showgrid=True,
+            showgrid=False,
+            categoryarray=complete_date_range_str,
             gridcolor='LightGray',
             gridwidth=1          
         ),
@@ -187,7 +188,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
             type='category',
             categoryorder='array',
             categoryarray=complete_date_range_str,
-            showgrid=True,
+            showgrid=False,
             gridcolor='LightGray',
             gridwidth=1  
         ),
@@ -208,7 +209,8 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
         xaxis=dict(
             tickfont=dict(size=18),
             type='category',
-            showgrid=True,
+            showgrid=False,
+            categoryarray=complete_date_range_str,
             gridcolor='LightGray',
             gridwidth=1          
         ),
@@ -218,7 +220,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
             type='category',
             categoryorder='array',
             categoryarray=complete_date_range_str,
-            showgrid=True,
+            showgrid=False,
             gridcolor='LightGray',
             gridwidth=1  
         ),
@@ -265,6 +267,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         booking_rate br ON b.booking_id=br.booking_rate_id
     JOIN
     rate_history rh on rh.hotel_id = b.hotel_id and rh.stay_date = dt."date"
+    join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id 
     WHERE
         dt."date"::date = '{stay_date}'
         AND b.created_date = '{created_date}'

@@ -11,6 +11,7 @@ import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
 
+
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -580,12 +581,12 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         filtered_df = filtered_df[(filtered_df['created_date'] >= created_date_start) & (filtered_df['created_date'] <= created_date_end)]
 
     # Update dropdown options
-    if 'room_name' in filtered_df.columns:
-        rooms = filtered_df['room_name'].dropna().unique()
-        room_options = [{'label': room, 'value': room} for room in rooms]
+    if 'booking_channel_name' in filtered_df.columns and not filtered_df['booking_channel_name'].isnull().all():
+        channels = filtered_df['booking_channel_name'].dropna().unique()
+        channel_options = [{'label': channel, 'value': channel} for channel in channels]
 
-    if selected_rooms:
-        filtered_df = filtered_df[filtered_df['room_name'].isin(selected_rooms)]
+    if selected_channels:
+        filtered_df = filtered_df[filtered_df['booking_channel_name'].isin(selected_channels)]
 
     if 'rate_plan_code' in filtered_df.columns:
         rate_code = filtered_df['rate_plan_code'].dropna().unique()
@@ -595,12 +596,12 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     if selected_rate_plan:
         filtered_df = filtered_df[filtered_df['rate_plan_code'].isin(selected_rate_plan)]
 
-    if 'booking_channel_name' in filtered_df.columns and not filtered_df['booking_channel_name'].isnull().all():
-        channels = filtered_df['booking_channel_name'].dropna().unique()
-        channel_options = [{'label': channel, 'value': channel} for channel in channels]
+    if 'room_name' in filtered_df.columns:
+        rooms = filtered_df['room_name'].dropna().unique()
+        room_options = [{'label': room, 'value': room} for room in rooms]
 
-    if selected_channels:
-        filtered_df = filtered_df[filtered_df['booking_channel_name'].isin(selected_channels)]
+    if selected_rooms:
+        filtered_df = filtered_df[filtered_df['room_name'].isin(selected_rooms)]
 
     if 'booking_status' in filtered_df.columns and not filtered_df['booking_status'].isnull().all():
         bookingstatus = filtered_df['booking_status'].dropna().unique()
@@ -717,7 +718,6 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
     # Return updated components
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
-
 
 if __name__ == '__main__':
         serve(server, host='0.0.0.0', port=8000)

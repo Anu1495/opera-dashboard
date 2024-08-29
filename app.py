@@ -88,7 +88,14 @@ server = Flask(__name__)
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Define the custom color scale
-colorscale = 'viridis'
+custom_colorscale = [
+    [0, 'white'],
+    [0.1, 'yellow'],
+    [0.4, 'blue'],
+    [0.6, 'orange'],
+    [0.8, 'red'],
+    [1, 'brown']
+]
 
 def create_heatmaps(df, booking_title, revenue_title, colorscale):
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
@@ -613,7 +620,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         df=filtered_df, 
         booking_title='Hotel Booking Heatmap', 
         revenue_title='Hotel Revenue Heatmap', 
-        colorscale=colorscale
+        colorscale=custom_colorscale
     )
     
     # Synchronize heatmap zoom and pan

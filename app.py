@@ -236,65 +236,98 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
     detail_query = f"""
+    WITH BookingData AS (
     SELECT
-        dt."date"::date AS stay_date, min(rh.amount) as amount,
-        b.created_date::date,
-        b.cancel_date::date,
-        b.booking_reference,
-        ROUND(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END)), 2) AS total_revenue,
-        COUNT(b.booking_reference) AS number_of_bookings,
-        COUNT(b.booking_reference) AS number_of_bookings,
-        b.booking_status,
-        EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
-        b.booking_channel_name,
-        r."name" AS room_name,
-        b.room_number,
+        b.booking_id,
+        b.hotel_id,
+        b.room_id,
+        b.created_date::date AS created_date,
         b.check_in,
         b.check_out,
+        b.booking_reference,
+        b.booking_channel_name,
+        b.booking_status,
         b.rate_plan_code,
-        h."name", r.code,
-        b.nights
+        b.nights,
+        COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)) AS total_revenue_x,
+        h."name" AS hotel_name,
+        r."name" AS room_name,
+        dt."date" AS stay_date
     FROM
         booking b
     JOIN
         hotel h ON b.hotel_id = h.hotel_id
-    JOIN 
-        room r ON b.room_id=r.room_id
-    JOIN 
-        caldate dt ON b.check_in <= dt."date" 
-        AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
-    LEFT OUTER JOIN 
-        booking_rate br ON b.booking_id=br.booking_rate_id
-    left join 
-	rate_update ru on ru.hotel_id = b.hotel_id 
     JOIN
-    rate_new rh on rh.stay_date = dt."date" and ru.rate_update_id = rh.rate_update_id 
-    join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id
-
+        room r ON b.room_id = r.room_id
+    JOIN
+        caldate dt ON b.check_in <= dt."date"
+        AND (b.check_out > dt."date" OR (b.check_in = b.check_out AND dt."date" = b.check_in))
+    LEFT JOIN
+        booking_rate br ON b.booking_id = br.booking_rate_id
     WHERE
-        dt."date"::date = '{stay_date}'
-        AND b.created_date = '{created_date}'
-        AND b.hotel_id = {selected_hotel}
-        {channel_filter}
-        {room_filter}
-        {rate_plan_filter}
-        {book_status_filter}
+        b.created_date = '2024-05-12'
+        AND dt."date" = '2024-05-22'
+        AND b.hotel_id = 6
+),
+RateData AS (
+    SELECT
+        rh.stay_date,
+        MIN(rh.amount) AS min_rate,
+        ru.hotel_id,
+        or2.ota_room_id
+    FROM
+        rate_new rh
+    JOIN
+        rate_update ru ON ru.rate_update_id = rh.rate_update_id
+    JOIN
+        ota_room or2 ON or2.ota_room_id = rh.ota_room_id
+    WHERE
+        rh.stay_date = '2024-05-22'
+        AND ru.hotel_id = 6
     GROUP BY
-        dt."date",
-        b.created_date::date,
-        b.check_in, r."name",
-        b.rate_plan_code, b.booking_channel_name, 
-        b.check_out, b.booking_reference,
-        br.total_revenue, b.total_revenue,
-        b.nights,
-        b.room_number,
-        h."name",
-        r."name",r.code,
-        b.cancel_date,
-        b.booking_status
-    ORDER BY
-        b.created_date::date,
-        dt."date" ASC;
+        rh.stay_date, ru.hotel_id, or2.ota_room_id
+)
+SELECT
+    bd.stay_date,
+    rd.min_rate,
+    rd.ota_room_id,
+    bd.hotel_name,
+    bd.total_revenue_x,
+    bd.created_date,
+    bd.hotel_id,
+    bd.check_in,
+    bd.check_out,
+    bd.booking_reference,
+    bd.booking_channel_name,
+    bd.booking_status,
+    bd.room_name,
+    bd.rate_plan_code,
+    COUNT(bd.booking_reference) AS number_of_bookings,
+    SUM(bd.total_revenue_x) AS total_revenue
+FROM
+    BookingData bd
+JOIN
+    RateData rd ON bd.hotel_id = rd.hotel_id
+    AND bd.stay_date = rd.stay_date
+    AND bd.room_id = (SELECT room_id FROM ota_room WHERE ota_room_id = rd.ota_room_id)
+GROUP BY
+    bd.stay_date,
+    rd.min_rate,
+    rd.ota_room_id,
+    bd.hotel_name,
+    bd.total_revenue_x,
+    bd.created_date,
+    bd.hotel_id,
+    bd.check_in,
+    bd.check_out,
+    bd.booking_reference,
+    bd.booking_channel_name,
+    bd.booking_status,
+    bd.room_name,
+    bd.rate_plan_code
+ORDER BY
+    bd.created_date,
+    bd.stay_date;
     """
     
     return pd.read_sql_query(detail_query, engine)

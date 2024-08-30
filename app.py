@@ -265,9 +265,11 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
     LEFT OUTER JOIN 
         booking_rate br ON b.booking_id=br.booking_rate_id
+    left join 
+	rate_update ru on ru.hotel_id = b.hotel_id 
     JOIN
-    rate_history rh on rh.hotel_id = b.hotel_id and rh.stay_date = dt."date"
-    join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id 
+    rate_new rh on rh.stay_date = dt."date" and ru.rate_update_id = rh.rate_update_id 
+    join ota_room or2 on or2.ota_room_id = rh.ota_room_id and or2.room_id = b.room_id
 
     WHERE
         dt."date"::date = '{stay_date}'

@@ -235,7 +235,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
     rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
-        detail_query = f"""
+    detail_query = f"""
     WITH BookingData AS (
         SELECT
             b.booking_id,
@@ -773,6 +773,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
     # Return updated components
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
+
 
 if __name__ == '__main__':
         serve(server, host='0.0.0.0', port=8000)

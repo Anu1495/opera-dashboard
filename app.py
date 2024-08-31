@@ -10,6 +10,8 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+import webbrowser
+import threading
 
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -243,15 +245,15 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
             b.room_id,
             b.created_date::date AS created_date,
             b.check_in,
-            b.check_out,
-            b.booking_reference,
+            b.check_out, b.cancel_date::date AS cancel_date,
+            b.booking_reference, EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
             b.booking_channel_name,
             b.booking_status,
             b.rate_plan_code,
             b.nights,
             COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)) AS total_revenue_x,
             h."name" AS hotel_name,
-            r."name" AS room_name,
+            r."name" AS room_name, r.code as rate_code,
             dt."date" AS stay_date
         FROM
             booking b
@@ -305,11 +307,11 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
                   AND rh.ota_room_id IS NULL
             )
         ) AS min_rate,
-        rd.ota_room_id,
+        rd.ota_room_id, bd.rate_code, bd.date_difference,
         bd.hotel_name,
         bd.total_revenue_x,
         bd.created_date,
-        bd.hotel_id,
+        bd.hotel_id, bd.cancel_date,
         bd.check_in,
         bd.check_out,
         bd.booking_reference,
@@ -326,16 +328,16 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         AND bd.stay_date = rd.stay_date
         AND bd.room_id = rd.room_id
     GROUP BY
-        bd.stay_date,
+        bd.stay_date, bd.cancel_date,
         rd.min_rate,
-        rd.ota_room_id,
+        rd.ota_room_id, bd.rate_code,
         bd.hotel_name,
         bd.total_revenue_x,
         bd.created_date,
         bd.hotel_id,
         bd.check_in,
         bd.check_out,
-        bd.booking_reference,
+        bd.booking_reference, bd.date_difference,
         bd.booking_channel_name,
         bd.booking_status,
         bd.room_name,
@@ -502,7 +504,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                         {'name': 'Booking Status', 'id': 'booking_status'},
                         {'name': 'Selling Rate', 'id': 'min_rate'},
                         {'name': 'Room Name', 'id': 'room_name'},
-                        {'name': 'Room Code', 'id': 'code'},
+                        {'name': 'Room Code', 'id': 'rate_code'},
                         {'name': 'Lead In', 'id': 'date_difference'},
                         {'name': 'Cancel Date', 'id': 'cancel_date'},
                         {'name': 'Stay Date', 'id': 'stay_date'},
@@ -774,6 +776,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     # Return updated components
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
 
-
+def open_browser():
+    webbrowser.open_new('http://localhost:8000/')
 if __name__ == '__main__':
+        threading.Timer(1, open_browser).start()
         serve(server, host='0.0.0.0', port=8000)

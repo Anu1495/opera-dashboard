@@ -350,32 +350,32 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     return pd.read_sql_query(detail_query, engine)
 
 # Define the bar chart for booking channels
-def create_bar_chart(df):
-    df['month'] = pd.to_datetime(df['stay_date']).dt.to_period('M').astype(str)
-    fig = go.Figure()
-    
-    # Group by booking channel and date
-    for channel in df['booking_channel_name'].unique():
-        channel_df = df[df['booking_channel_name'] == channel]
-        monthly_data = channel_df.groupby('month')['number_of_bookings'].sum().reset_index()
-        fig.add_trace(go.Bar(
-            x=monthly_data['month'],
-            y=monthly_data['number_of_bookings'],
-            name=channel
-        ))
-    
-    fig.update_layout(
-        title='Bookings by Channel Over Time',
-        xaxis_title='Month',
-        yaxis_title='Number of Bookings',
-        barmode='stack',  # Stack bars on top of each other
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        width=1500,  # Set chart width
-        height=500  # Set chart height
+def create_bar_chart(df_filtered):
+    # Generate a color scale with a color for each bar
+    colorscale = [[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(0, 255, 0)'], [1, 'rgb(0, 0, 255)']]  # Example colors
+
+    # Map total revenues to colors
+    total_revenues = df_filtered['total_revenue']
+    color_map = {revenue: color for revenue, color in zip(total_revenues, colorscale)}
+
+    # Create a list of colors corresponding to each total revenue
+    colors = [color_map[revenue] for revenue in total_revenues]
+
+    bar_chart_fig = go.Figure(data=go.Bar(
+        x=df_filtered['created_date'],
+        y=df_filtered['total_revenue'],
+        marker=dict(color=colors),
+        text=df_filtered['total_revenue'],
+        textposition='auto'
+    ))
+
+    bar_chart_fig.update_layout(
+        title='Total Revenue by Created Date',
+        xaxis_title='Created Date',
+        yaxis_title='Total Revenue'
     )
-    
-    return fig
+
+    return bar_chart_fig
 
 # Layout of the Dash app
 app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
@@ -490,6 +490,10 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
         dbc.Col(dcc.Graph(id='booking_heatmap'), width=6),
         dbc.Col(dcc.Graph(id='revenue_heatmap'), width=6)
     ]),
+
+    dbc.Row([
+        dbc.Col(dcc.Graph(id='line-chart'), width=12)  # Add this line for the line chart
+    ]),
             
     html.Div([
         html.H2('Booking Details'),
@@ -574,13 +578,14 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
 
 ], fluid=True)
 # Updated callback function to handle room_name filter and preserve layout changes
-from datetime import datetime
+from datetime import datetime, timedelta
 
 @app.callback(
     [Output('booking_heatmap', 'figure'),
      Output('revenue_heatmap', 'figure'),
      Output('booking-details', 'data'),
      Output('bar-chart', 'figure'),
+     Output('line-chart', 'figure'),  # New line chart output
      Output('channel-dropdown', 'options'),
      Output('additional-details', 'data'),
      Output('room-dropdown', 'options'),
@@ -602,9 +607,12 @@ from datetime import datetime
      Input('created-date-picker', 'start_date'),
      Input('created-date-picker', 'end_date')]
 )
+
+
 def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, booking_click_data, revenue_click_data, booking_relayout, revenue_relayout, stay_date_start, stay_date_end, created_date_start, created_date_end):
     # Default values
     booking_heatmap = go.Figure()
+    line_chart_fig = go.Figure()
     revenue_heatmap = go.Figure()
     booking_details_data = []
     bar_chart_fig = go.Figure()
@@ -625,8 +633,12 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         created_date_end = datetime.strptime(created_date_end, '%Y-%m-%d').date()
 
     # Ensure dataframe date columns are in datetime format
-    df['created_date'] = pd.to_datetime(df['created_date']).dt.date
-    df['stay_date'] = pd.to_datetime(df['stay_date']).dt.date
+    df['created_date'] = pd.to_datetime(df['created_date'])
+    df['stay_date'] = pd.to_datetime(df['stay_date'])
+
+    # Convert to datetime.date for filtering
+    df['created_date'] = df['created_date'].dt.date
+    df['stay_date'] = df['stay_date'].dt.date
 
     # Filter data based on selected hotel
     filtered_df = df[df['hotel_id'] == selected_hotel] if selected_hotel else df.copy()
@@ -734,7 +746,183 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
             showlegend=False
         ))
 
-        # Fetch booking details
+        # Filter data for the selected stay date and count bookings per created date
+        stay_date_filtered_df = filtered_df[filtered_df['stay_date'] == stay_date]
+        line_chart_data = stay_date_filtered_df.groupby('created_date').size().reset_index(name='number_of_bookings')
+    
+        # Ensure 'created_date' in line_chart_data is datetime64[ns]
+        line_chart_data['created_date'] = pd.to_datetime(line_chart_data['created_date'])
+
+        # Generate a complete date range from the minimum to the maximum created date in the filtered DataFrame
+        if not line_chart_data.empty:
+            min_date = line_chart_data['created_date'].min()
+            max_date = line_chart_data['created_date'].max()
+        else:
+            min_date = created_date
+            max_date = created_date
+
+        complete_date_range = pd.date_range(start=min_date, end=max_date).date
+
+        # Create DataFrame for the complete date range
+        complete_line_chart_data = pd.DataFrame(complete_date_range, columns=['created_date'])
+
+        # Ensure 'created_date' in complete_line_chart_data is datetime64[ns]
+        complete_line_chart_data['created_date'] = pd.to_datetime(complete_line_chart_data['created_date'])
+
+        # Merge complete date range with the line chart data to fill missing dates with zero bookings
+        complete_line_chart_data = pd.merge(
+            complete_line_chart_data, 
+            line_chart_data, 
+            on='created_date', 
+            how='left'
+        ).fillna(0)  # Fill missing booking numbers with zero
+
+        # Convert number_of_bookings to integer after filling NaNs
+        complete_line_chart_data['number_of_bookings'] = complete_line_chart_data['number_of_bookings'].astype(int)
+
+        # Calculate the total number of bookings for the selected stay date
+        total_bookings = complete_line_chart_data['number_of_bookings'].sum()
+
+        # Create the line chart with markers and labels
+        line_chart_fig = go.Figure()
+        line_chart_fig.add_trace(go.Scatter(
+            x=complete_line_chart_data['created_date'],
+            y=complete_line_chart_data['number_of_bookings'],
+            mode='lines+markers+text',
+            line=dict(color='blue'),
+            marker=dict(size=8),
+            text=complete_line_chart_data['number_of_bookings'],  # Labels for each marker
+            textposition="top center",  # Position labels above markers
+            name=f'Bookings for Stay Date: {stay_date}'
+        ))
+
+        # Update layout with the title including the total number of bookings
+        line_chart_fig.update_layout(
+            title={
+                'text': f'<b>Booking Trends for Stay Date: {stay_date} | Total Bookings: {total_bookings}</b>',  # Title with total bookings, bold
+                'x': 0.5,  # Center align the title
+                'xanchor': 'center',
+                'font': {
+                    'size': 20,  # Font size of the title
+                    'color': 'black',  # Title color
+                },
+            },
+            xaxis_title='Created Date',  # X-axis label
+            yaxis_title='Number of Bookings',  # Y-axis label
+            xaxis=dict(
+                tickformat="%b %d",  # Date format as "Jun 10"
+                tickangle=45,  # Rotate tick labels for readability
+                title_font=dict(size=12),  # Increase font size of the x-axis label
+                tickfont=dict(size=12),  # Font size of tick labels
+                type='category'  # Show all dates including those with no data
+            ),
+            yaxis=dict(
+                tickformat=",",  # Format y-axis numbers with commas
+                title_font=dict(size=20),  # Increase font size of the y-axis label
+                tickfont=dict(size=16)  # Font size of tick labels
+            ),
+            plot_bgcolor='white',  # Set background color to white
+            paper_bgcolor='white',  # Set the overall figure background color to white
+            margin=dict(l=50, r=50, b=50, t=50, pad=4),  # Adjust chart margins
+            height=800,  # Chart height
+        )
+
+        # Filter data for the selected stay date and calculate total revenue per created date
+      
+        stay_date_filtered_df = filtered_df[filtered_df['stay_date'] == stay_date]
+
+        # Group data by 'created_date' and 'room_name' to get the total revenue per room
+        room_revenue_data = stay_date_filtered_df.groupby(['created_date', 'room_name'])['total_revenue'].sum().reset_index()
+
+        # Ensure 'created_date' in room_revenue_data is datetime64[ns]
+        room_revenue_data['created_date'] = pd.to_datetime(room_revenue_data['created_date'])
+
+        # Generate a complete date range from the minimum to the maximum created date in the filtered DataFrame
+        if not room_revenue_data.empty:
+            min_date = room_revenue_data['created_date'].min()
+            max_date = room_revenue_data['created_date'].max()
+        else:
+            min_date = created_date
+            max_date = created_date
+
+        complete_date_range = pd.date_range(start=min_date, end=max_date)
+
+        # Create DataFrame for the complete date range
+        complete_revenue_data = pd.DataFrame(complete_date_range, columns=['created_date'])
+
+        # Merge complete date range with the room revenue data to fill missing dates with zero revenue for each room
+        room_names = stay_date_filtered_df['room_name'].unique()
+        
+        # Define color scheme
+        color_scheme = ['yellow', 'blue', 'green', 'red', 'orange', 'violet', 'brown']
+        # Create a bar chart figure
+        bar_chart_fig = go.Figure()
+        # Add a bar trace for each room name
+        for i, room_name in enumerate(room_names):
+            room_data = room_revenue_data[room_revenue_data['room_name'] == room_name]
+            
+            # Merge with complete date range to ensure all dates are included
+            complete_room_data = pd.merge(
+                complete_revenue_data, 
+                room_data, 
+                on='created_date', 
+                how='left'
+            ).fillna(0)  # Fill missing revenue with zero
+
+            # Highlight condition: bookings exist but revenue is zero
+            complete_room_data['highlight'] = (
+                complete_room_data['total_revenue'] == 0
+            ) & complete_room_data['created_date'].isin(
+                complete_line_chart_data[complete_line_chart_data['number_of_bookings'] > 0]['created_date']
+            )
+
+            # Add bar trace for each room
+            bar_chart_fig.add_trace(go.Bar(
+                x=complete_room_data['created_date'],
+                y=complete_room_data['total_revenue'].round(2),
+                name=f'Room: {room_name}',
+                marker_color=color_scheme[i % len(color_scheme)],  # Use main colors for the bars
+                text=complete_room_data['total_revenue'].round(2),  # Labels for each bar
+                textposition='auto',  # Position labels inside bars
+            ))
+            
+
+        # Calculate the total revenue for the selected stay date
+        total_revenue = room_revenue_data['total_revenue'].sum()
+
+        # Update layout with the title including the total revenue
+        bar_chart_fig.update_layout(
+            barmode='stack',  # Stack bars on top of each other
+            title={
+                'text': f'<b>Revenue Trends for Stay Date: {stay_date} | Total Revenue: ${total_revenue:,.2f}</b>',  # Title with total revenue, bold
+                'x': 0.5,  # Center align the title
+                'xanchor': 'center',
+                'font': {
+                    'size': 20,  # Font size of the title
+                    'color': 'black',  # Title color
+                },
+            },
+            xaxis_title='Created Date',  # X-axis label
+            yaxis_title='Total Revenue',  # Y-axis label
+            xaxis=dict(
+                tickformat="%b %d",  # Date format as "Jun 10"
+                tickangle=45,  # Rotate tick labels for readability
+                title_font=dict(size=12),  # Increase font size of the x-axis label
+                tickfont=dict(size=12),  # Font size of tick labels
+                type='category'  # Show all dates including those with no data
+            ),
+            yaxis=dict(
+                tickformat="$,.2f",  # Format y-axis numbers with currency and two decimal places
+                title_font=dict(size=20),  # Increase font size of the y-axis label
+                tickfont=dict(size=16)  # Font size of tick labels
+            ),
+            plot_bgcolor='white',  # Set background color to white
+            paper_bgcolor='white',  # Set the overall figure background color to white
+            margin=dict(l=50, r=50, b=50, t=50, pad=4),  # Adjust chart margins
+            height=800,  # Chart height
+        )
+
+      # Fetch booking details
         booking_details_df = fetch_booking_details(
             stay_date, created_date, selected_hotel, 
             selected_channels if selected_channels else [], 
@@ -768,14 +956,9 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
                     additional_data = [
                         {'first_name': row[0], 'last_name': row[1], 'room_number': row[2], 'hotel_id': row[3]}
                         for row in result
-                    ]
+                    ]    # Return updated components
+    return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
     
-    # Create bar chart
-    bar_chart_fig = create_bar_chart(filtered_df)
-
-    # Return updated components
-    return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
-
 def open_browser():
     webbrowser.open_new('http://localhost:8000/')
 if __name__ == '__main__':

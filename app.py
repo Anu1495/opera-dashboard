@@ -5,11 +5,12 @@ from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -81,8 +82,6 @@ engine.dispose()
 # Create a Flask server instance
 server = Flask(__name__)
 
-
-
 # Create the Dash app
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
@@ -116,14 +115,39 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
     df_agg['stay_date_str'] = df_agg['stay_date'].dt.strftime('%Y-%m-%d')
 
     # Pivot tables for bookings and revenue
-    bookings_pivot = df_agg.pivot_table(index="created_date_str", columns="stay_date_str", values="number_of_bookings", fill_value=0, aggfunc='sum')
-    revenue_pivot = df_agg.pivot_table(index="created_date_str", columns="stay_date_str", values="total_revenue", fill_value=0, aggfunc='sum')
+    bookings_pivot = df_agg.pivot_table(
+        index="created_date_str",
+        columns="stay_date_str",
+        values="number_of_bookings",
+        fill_value=0,
+        aggfunc='sum'
+    )
+    
+    revenue_pivot = df_agg.pivot_table(
+        index="created_date_str",
+        columns="stay_date_str",
+        values="total_revenue",
+        fill_value=0,
+        aggfunc='sum'
+    )
 
-    customdata_revenue = revenue_pivot.reindex(complete_date_range_str, fill_value=0).values
-    channel_names = df_agg.groupby(['created_date_str', 'stay_date_str'])['booking_channel_name'].apply(lambda x: ', '.join(x.unique())).unstack().reindex(complete_date_range_str, fill_value='').values
+    # Align customdata with pivot tables
+    customdata_revenue = revenue_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
+    channel_names = df_agg.groupby(['created_date_str', 'stay_date_str'])['booking_channel_name'].apply(lambda x: ', '.join(x.unique())).unstack().reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value='').values
+
+    # Debug: Check alignment
+    print("Bookings Pivot Data:\n", bookings_pivot)
+    print("Revenue Pivot Data:\n", revenue_pivot)
+    print("Customdata Revenue:\n", customdata_revenue)
+    print("Channel Names:\n", channel_names)
 
     # Combining custom data
     combined_customdata = np.dstack((channel_names, customdata_revenue))
+
+    # Check customdata shape and content for reserved filter
+    if 'Reserved' in df['booking_status'].unique():
+        reserved_customdata = combined_customdata # Adjust as needed for the specific filter
+        print("Customdata for Reserved Status:\n", reserved_customdata)
 
     # Creating the booking heatmap
     booking_fig = go.Figure(data=go.Heatmap(
@@ -135,7 +159,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
             'Booking Date: %{y}<br>' +
             'Stay Date: %{x}<br>' +
             'Total Number of Bookings: %{z}<br>' +
-            'Total Revenue: %{customdata[1]:.2f}'
+            'Total Revenue: %{customdata[1]:.2f}<br>'
         ),
         colorscale=colorscale,
         colorbar=dict(title="Number of Bookings", tickvals=[0, 5, 10], ticktext=['0', '5', '10']),
@@ -226,6 +250,7 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
     )
 
     return booking_fig, revenue_fig
+
 
 
 
@@ -347,12 +372,80 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     return pd.read_sql_query(detail_query, engine)
 
 # Define the bar chart for booking channels
+def fetch_data_with_sql_query(selected_hotel, stay_date):
+    # Define the SQL query using parameterized placeholders
+    sql_query = text("""
+    WITH aggregated_data AS (
+        SELECT
+            dt."date" AS stay_date,
+            h."name" AS hotel_name,
+            b.created_date::date AS created_date, 
+            EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
+            h.hotel_id,
+            b.booking_channel_name,
+            b.booking_status, 
+            r."name" AS room_name,
+            b.rate_plan_code,
+            COUNT(b.booking_reference) AS number_of_bookings,
+            SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
+        FROM
+            booking b
+        JOIN
+            hotel h ON b.hotel_id = h.hotel_id
+        JOIN 
+            room r ON b.room_id = r.room_id
+        JOIN 
+            caldate dt ON b.check_in <= dt."date" 
+            AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
+        LEFT OUTER JOIN 
+            booking_rate br ON b.booking_id = br.booking_rate_id
+        WHERE
+            dt."date" = :stay_date
+            AND b.hotel_id = :selected_hotel AND b.booking_status = 'CheckedOut'
+        GROUP BY
+            dt."date",
+            b.created_date::date,
+            h.name,
+            h.hotel_id,
+            b.rate_plan_code,
+            b.booking_status,
+            b.booking_channel_name,
+            r."name"
+    )
+    SELECT
+        stay_date,
+        hotel_name,
+        created_date,
+        hotel_id,
+        booking_channel_name, 
+        date_difference,
+        booking_status,
+        room_name,
+        rate_plan_code,
+        number_of_bookings,
+        total_revenue,
+        SUM(number_of_bookings) OVER (
+            PARTITION BY stay_date, booking_status
+            ORDER BY created_date
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS cumulative_bookings
+    FROM
+        aggregated_data
+    ORDER BY
+        hotel_id, stay_date, created_date;
+    """)
+    
+    # Execute the query using parameters
+    return pd.read_sql_query(sql_query, engine, params={"stay_date": stay_date, "selected_hotel": selected_hotel})
 
 # Layout of the Dash app
-app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
+app.layout = dbc.Container([
+    dcc.Store(id='last-clicked-heatmap', data='none'),
+
     dbc.Row([
         dbc.Col(html.H1("Hotel Booking Dashboard"), width={"size": 6, "offset": 4})
     ]),
+
     dbc.Row([
         dbc.Col([
             html.Div("Stay Date:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '20px', 'fontFamily': 'Arial'}),
@@ -402,7 +495,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                 multi=True,  # Enable multi-select
                 style={
                     'width': '100%', 
-                    'fontSize': '20px',  # Font size
+                    'fontSize': '16px',  # Font size
                     'fontFamily': 'Arial',  # Font family
                     'color': 'black'  # Font color
                 },
@@ -416,7 +509,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                 multi=True,
                 style={
                     'width': '100%', 
-                    'fontSize': '20px',  # Font size
+                    'fontSize': '16px',  # Font size
                     'fontFamily': 'Arial',
                     'color': 'black'  # Font color
                 },
@@ -432,7 +525,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                 multi=True,
                 style={
                     'width': '100%', 
-                    'fontSize': '20px',  # Font size
+                    'fontSize': '16px',  # Font size
                     'fontFamily': 'Arial',
                     'color': 'black'  # Font color
                 },
@@ -448,7 +541,7 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
                 multi=True,
                 style={
                     'width': '100%', 
-                    'fontSize': '20px',  # Font size
+                    'fontSize': '16px',  # Font size
                     'fontFamily': 'Arial',  # Font family
                     'color': 'black'  # Font color
                 },
@@ -457,98 +550,117 @@ app.layout = dbc.Container([ dcc.Store(id='last-clicked-heatmap', data='none'),
         ], width=2),
     ], style={'marginBottom': '20px'}),
 
-    dbc.Row([
-        dbc.Col(dcc.Graph(id='booking_heatmap'), width=6),
-        dbc.Col(dcc.Graph(id='revenue_heatmap'), width=6)
-    ]),
+    # Tabs layout
+    dcc.Tabs([
+        dcc.Tab(label='Main Dashboard', children=[
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='booking_heatmap'), width=6),
+                dbc.Col(dcc.Graph(id='revenue_heatmap'), width=6)
+            ]),
 
-    dbc.Row([
-        dbc.Col(dcc.Graph(id='line-chart'), width=12)  # Add this line for the line chart
-    ]),
-            
-    html.Div([
-        html.H2('Booking Details'),
-        dcc.Loading(
-            id="loading-booking-details",
-            type="circle",
-            children=[
-                dash_table.DataTable(
-                    id='booking-details',
-                    columns=[
-                        {'name': 'Booking Reference', 'id': 'booking_reference'},
-                        {'name': 'Booking Status', 'id': 'booking_status'},
-                        {'name': 'Selling Rate', 'id': 'min_rate'},
-                        {'name': 'Room Name', 'id': 'room_name'},
-                        {'name': 'Room Code', 'id': 'rate_code'},
-                        {'name': 'Lead In', 'id': 'date_difference'},
-                        {'name': 'Cancel Date', 'id': 'cancel_date'},
-                        {'name': 'Stay Date', 'id': 'stay_date'},
-                        {'name': 'Booking Date', 'id': 'created_date'},
-                        {'name': 'Total Revenue', 'id': 'total_revenue'},
-                        {'name': 'Booking Channel', 'id': 'booking_channel_name'},
-                        {'name': 'Check-in Date', 'id': 'check_in'},
-                        {'name': 'Check-out Date', 'id': 'check_out'},
-                        {'name': 'Rate Plan', 'id': 'rate_plan_code'},
-                    ],
-                    style_table={'overflowX': 'auto', 'fontSize': 14},
-                    style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
-                    style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
-                    style_data_conditional=[
-                        {
-                            'if': {'row_index': 'odd'},
-                            'backgroundColor': 'rgb(248, 248, 248)',
-                        },
-                    ],
-                    style_as_list_view=True
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='line-chart'), width=12)  # Add this line for the line chart
+            ]),
+
+            html.Div([
+                html.H2('Booking Details'),
+                dcc.Loading(
+                    id="loading-booking-details",
+                    type="circle",
+                    children=[
+                        dash_table.DataTable(
+                            id='booking-details',
+                            columns=[
+                                {'name': 'Booking Reference', 'id': 'booking_reference'},
+                                {'name': 'Booking Status', 'id': 'booking_status'},
+                                {'name': 'Selling Rate', 'id': 'min_rate'},
+                                {'name': 'Room Name', 'id': 'room_name'},
+                                {'name': 'Room Code', 'id': 'rate_code'},
+                                {'name': 'Lead In', 'id': 'date_difference'},
+                                {'name': 'Cancel Date', 'id': 'cancel_date'},
+                                {'name': 'Stay Date', 'id': 'stay_date'},
+                                {'name': 'Booking Date', 'id': 'created_date'},
+                                {'name': 'Total Revenue', 'id': 'total_revenue'},
+                                {'name': 'Booking Channel', 'id': 'booking_channel_name'},
+                                {'name': 'Check-in Date', 'id': 'check_in'},
+                                {'name': 'Check-out Date', 'id': 'check_out'},
+                                {'name': 'Rate Plan', 'id': 'rate_plan_code'},
+                            ],
+                            style_table={'overflowX': 'auto', 'fontSize': 14},
+                            style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
+                            style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
+                            style_data_conditional=[
+                                {
+                                    'if': {'row_index': 'odd'},
+                                    'backgroundColor': 'rgb(248, 248, 248)',
+                                },
+                            ],
+                            style_as_list_view=True
+                        )
+                    ]
                 )
-            ]
-        )
-    ], style={'width': '100%', 'padding': '10px'}),
+            ], style={'width': '100%', 'padding': '10px'}),
 
-    html.Div([
-        html.H2('Additional Booking Details'),
-        dcc.Loading(
-            id="loading-additional-details",
-            type="circle",
-            children=[
-                dash_table.DataTable(
-                    id='additional-details',
-                    columns=[
-                        {'name': 'First Name', 'id': 'first_name'},
-                        {'name': 'Last Name', 'id': 'last_name'},
-                        {'name': 'Room Number', 'id': 'room_number'},
-                        {'name': 'Email', 'id': 'email'},
-                        {'name': 'Market Code', 'id': 'market_code'},
-                    ],
-                    style_table={'overflowX': 'auto', 'fontSize': 14},
-                    style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
-                    style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
-                    style_data_conditional=[
-                        {
-                            'if': {'row_index': 'odd'},
-                            'backgroundColor': 'rgb(248, 248, 248)',
-                        },
-                    ],
-                    style_as_list_view=True
+            html.Div([
+                html.H2('Additional Booking Details'),
+                dcc.Loading(
+                    id="loading-additional-details",
+                    type="circle",
+                    children=[
+                        dash_table.DataTable(
+                            id='additional-details',
+                            columns=[
+                                {'name': 'First Name', 'id': 'first_name'},
+                                {'name': 'Last Name', 'id': 'last_name'},
+                                {'name': 'Room Number', 'id': 'room_number'},
+                                {'name': 'Email', 'id': 'email'},
+                                {'name': 'Market Code', 'id': 'market_code'},
+                            ],
+                            style_table={'overflowX': 'auto', 'fontSize': 14},
+                            style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
+                            style_header={'backgroundColor': 'lightgrey', 'fontWeight': 'bold', 'fontSize': 18, 'padding-right': '10px'},
+                            style_data_conditional=[
+                                {
+                                    'if': {'row_index': 'odd'},
+                                    'backgroundColor': 'rgb(248, 248, 248)',
+                                },
+                            ],
+                            style_as_list_view=True
+                        )
+                    ]
                 )
-            ]
-        )
-    ], style={'width': '100%', 'padding': '10px'}),
+            ], style={'width': '100%', 'padding': '10px'}),
 
-    html.Hr(),
+            html.Hr(),
 
-    dcc.Loading(
-        id="loading-bar-chart",
-        type="circle",
-        children=
-            dcc.Graph(id='bar-chart')
-        
-        
-    ),
+            dcc.Loading(
+                id="loading-bar-chart",
+                type="circle",
+                children=
+                    dcc.Graph(id='bar-chart')
+            ),
 
-    html.Div(id='hover-data', style={'display': 'none'})  # Placeholder for hover data
+            html.Div(id='hover-data', style={'display': 'none'})  # Placeholder for hover data
+        ]),
 
+        # Separate tab for the new line chart
+        dcc.Tab(label='Pickup Curve', children=[
+                dbc.Col([
+                    html.Div("Select Stay Date for Line Chart:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '20px', 'fontFamily': 'Arial'}),
+                    dcc.DatePickerSingle(
+                        id='line-chart-stay-date-picker',
+                        date='2024-01-01',  # Default date
+                        display_format='YYYY-MM-DD',
+                        style={'width': '100%', 'padding': '10px'}
+                    )
+                ], width=3),
+                
+                dbc.Col(dcc.Graph(id='new-line-chart'), width=12),
+                    # Adjust width as needed
+        ])
+    ])
 ], fluid=True)
+
 # Updated callback function to handle room_name filter and preserve layout changes
 from datetime import datetime, timedelta
 
@@ -579,7 +691,6 @@ from datetime import datetime, timedelta
      Input('created-date-picker', 'start_date'),
      Input('created-date-picker', 'end_date')]
 )
-
 def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, booking_click_data, revenue_click_data, booking_relayout, revenue_relayout, stay_date_start, stay_date_end, created_date_start, created_date_end):
     # Default values
     booking_heatmap = go.Figure()
@@ -910,9 +1021,95 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
                         {'first_name': row[0], 'last_name': row[1], 'room_number': row[2], 'hotel_id': row[3]}
                         for row in result
                     ]
-
+        
     # Return updated components
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
 
+
+@app.callback(
+    Output('new-line-chart', 'figure'),
+    [Input('hotel-dropdown', 'value'),
+     Input('line-chart-stay-date-picker', 'date'),
+     Input('channel-dropdown', 'value'),
+     Input('rate-dropdown', 'value')]  # Add rate dropdown input
+)
+def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels, selected_rate_plan):
+    # Check if stay date and hotel are selected
+    if not selected_stay_date or not selected_hotel:
+        return go.Figure()
+
+    # Fetch data using the provided SQL query function
+    new_line_chart_data = fetch_data_with_sql_query(selected_hotel, selected_stay_date)
+
+    # Filter data based on selected stay date and hotel
+    filtered_data = new_line_chart_data[
+        (new_line_chart_data['stay_date'] == selected_stay_date) &
+        (new_line_chart_data['hotel_id'] == selected_hotel)
+    ]
+
+    # Further filter data based on selected channels and rate plan if any
+    if selected_channels:
+        filtered_data = filtered_data[filtered_data['booking_channel_name'].isin(selected_channels)]
+    
+    if selected_rate_plan:
+        filtered_data = filtered_data[filtered_data['rate_plan_code'].isin(selected_rate_plan)]
+
+    # Initialize the figure
+    new_line_chart_fig = go.Figure()
+
+    # If channels are selected, plot separate lines for each channel
+    if selected_channels:
+        for channel in selected_channels:
+            channel_data = filtered_data[filtered_data['booking_channel_name'] == channel]
+            new_line_chart_fig.add_trace(go.Scatter(
+                x=channel_data['date_difference'],
+                y=channel_data['cumulative_bookings'],
+                mode='lines+markers',
+                line=dict(width=2),
+                fill='tozeroy',
+                marker=dict(size=10),
+                name=channel  # Channel name for legend
+            ))
+    else:
+        # Plot a single line if no channels are selected
+        new_line_chart_fig.add_trace(go.Scatter(
+            x=filtered_data['date_difference'],
+            y=filtered_data['cumulative_bookings'],
+            mode='lines+markers',
+            fill='tozeroy',
+            line=dict(color='blue'),
+            marker=dict(size=10),
+            name='Overall Bookings'
+        ))
+
+    new_line_chart_fig.update_layout(
+        title={
+            'text': f'Pickup Curve for Stay Date {selected_stay_date}',
+            'font': {'size': 20, 'color': 'black', 'family': 'Arial', 'weight': 'bold'},
+            'x': 0.5,
+            'xanchor': 'center'
+        },
+        xaxis_title='Lead In',
+        yaxis_title='Cumulative Bookings',
+        template='plotly_white',
+        xaxis=dict(
+            tickformat="%d",
+            tickangle=45,
+            title_font=dict(size=18),
+            autorange='reversed'  # Reverse the x-axis
+        ),
+        yaxis=dict(
+            tickformat=",.0f",
+            title_font=dict(size=18)
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin=dict(l=50, r=50, b=50, t=50, pad=4),
+        height=1000,
+    )
+
+    return new_line_chart_fig
+
 if __name__ == '__main__':
         serve(server, host='0.0.0.0', port=8000)
+

@@ -326,35 +326,37 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
         zmax=max_rate_value
     ))
 
-    # Add a scatter plot for refundable rate highlights with a black border
+    # Add a scatter plot for the non-refundable rate highlights with a solid marker on top
     highlight_trace_refundable = go.Scatter(
         x=highlighted_x_refundable,
         y=highlighted_y_refundable,
         mode='markers',
         marker=dict(
-            size=10,  # Size of the marker
-            color='rgba(0, 0, 0, 0)',  # Transparent fill color
+            size=10,  # Size of the main marker
+            color='black',  # Solid green color for main marker
             line=dict(
                 width=2,  # Border width
-                color='black'  # Border color
-            )
+                color='red'  # Border color
+            ),
+            symbol='x',  # Cross shape for main marker
         ),
         name='Refundable Rate',
         hoverinfo='x+y'
     )
-
-    # Add a scatter plot for non-refundable rate highlights with a red border
+    
+    # Add a scatter plot for the non-refundable rate highlights with a solid marker on top
     highlight_trace_non_refundable = go.Scatter(
         x=highlighted_x_non_refundable,
         y=highlighted_y_non_refundable,
         mode='markers',
         marker=dict(
-            size=10,  # Size of the marker
-            color='rgba(255, 0, 0, 0)',  # Transparent fill color
+            size=10,  # Size of the main marker
+            color='green',  # Solid green color for main marker
             line=dict(
                 width=2,  # Border width
-                color='pink'  # Border color
-            )
+                color='lightgreen'  # Border color
+            ),
+            symbol='x',  # Cross shape for main marker
         ),
         name='Non-Refundable Rate',
         hoverinfo='x+y'
@@ -363,7 +365,6 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
     # Add both scatter traces to the heatmap
     rate_fig.add_trace(highlight_trace_refundable)
     rate_fig.add_trace(highlight_trace_non_refundable)
-
 
     # Updating layout for both heatmaps
     booking_fig.update_layout(
@@ -872,7 +873,7 @@ dcc.Tabs([
     style={'fontSize': '20px', 'fontFamily': 'Arial'}  # Set font size and family for the tab label
 ),
 dcc.Tab(
-    label='Pickup Curve', 
+    label='Market Competitors', 
     children=[
         dbc.Row([
         dbc.Button('Toggle Heatmap', id='toggle-button1', n_clicks=0),

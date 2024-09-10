@@ -114,7 +114,7 @@ SELECT
     u.hotel_id, b.room_name, b.exp_rate,
     b.rate_plan_code, 
     b.created_date, b.booking_status,
-    b.booking_id,
+    b.booking_id, b.nights,
     u.report_date::date,
     b.booking_channel_name,
     r.stay_date::date AS stay_date,
@@ -143,7 +143,7 @@ GROUP BY
     u.hotel_id, b.room_name, b.exp_rate,
     b.rate_plan_code, b.booking_status,
     b.created_date,  
-    b.booking_id,
+    b.booking_id, b.nights,
     u.report_date,
     r.stay_date::date,
     b.total_revenue,
@@ -509,11 +509,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
 
     return booking_fig, revenue_fig, rate_fig
 
-def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status):
+def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_nights):
     channel_filter = f"AND b.booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
     rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
+    nights_filter = f"AND b.nights IN ({', '.join(f'\'{night}\'' for night in selected_nights)})" if selected_nights else ""
     detail_query = f"""
     WITH rate_updates AS (
         SELECT DISTINCT ON (u.hotel_id, date_update::date) 
@@ -575,6 +576,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
                 {room_filter}
                 {rate_plan_filter}
                 {book_status_filter}
+                {nights_filter}
     )
     SELECT 
         u.hotel_id, b.room_name, b.room_code,
@@ -799,6 +801,22 @@ app.layout = dbc.Container([
                 placeholder='Select Booking Status'  # Placeholder text
             ),
         ], width=2),
+
+        dbc.Col([
+            dcc.Dropdown(
+                id='night-dropdown',
+                options=[],  # Initially empty
+                value=[], 
+                multi=True,
+                style={
+                    'width': '100%', 
+                    'fontSize': '16px',  # Font size
+                    'fontFamily': 'Arial',  # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select Nights'  # Placeholder text
+            ),
+        ], width=2),
     ], style={'marginBottom': '20px'}),
 
 dcc.Tabs([
@@ -941,7 +959,8 @@ dcc.Tab(
      Output('additional-details', 'data'),
      Output('room-dropdown', 'options'),
      Output('rate-dropdown', 'options'),
-     Output('book-dropdown', 'options')],
+     Output('book-dropdown', 'options'),
+     Output('night-dropdown', 'options')],
     [Input('hotel-dropdown', 'value'),
      Input('channel-dropdown', 'value'),
      Input('room-dropdown', 'value'),
@@ -959,9 +978,10 @@ dcc.Tab(
      Input('heatmap3', 'relayoutData'),
      Input('heatmap1', 'clickData'),
      Input('heatmap2', 'clickData'),
-     Input('heatmap3', 'clickData')]
+     Input('heatmap3', 'clickData'),
+     Input('night-dropdown', 'value')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data):
+def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_nights):
     # Default values
     booking_heatmap = go.Figure()
     rate_heatmap = go.Figure()
@@ -974,7 +994,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     room_options = []
     rate_options = []
     book_options = []
-
+    nights_options = []
     # Convert date strings to datetime.date objects
     if stay_date_start:
         stay_date_start = datetime.strptime(stay_date_start, '%Y-%m-%d').date()
@@ -1031,6 +1051,14 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
     if selected_booking_status:
         filtered_df = filtered_df[filtered_df['booking_status'].isin(selected_booking_status)]
+
+    if 'nights' in filtered_df.columns:
+        nights = filtered_df['nights'].dropna().unique()
+        sorted_night_code = sorted([night for night in nights if night])
+        nights_options = [{'label': night, 'value': night} for night in sorted_night_code]
+
+    if selected_nights:
+        filtered_df = filtered_df[filtered_df['nights'].isin(selected_nights)]
 
     # Define custom colorscale for heatmaps
     custom_colorscale = [
@@ -1296,7 +1324,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
             selected_channels if selected_channels else [], 
             selected_rooms if selected_rooms else [], 
             selected_rate_plan if selected_rate_plan else [], 
-            selected_booking_status if selected_booking_status else []
+            selected_booking_status if selected_booking_status else [],
+            selected_nights if selected_nights else []
         )
         booking_details_data = booking_details_df.to_dict('records')
 
@@ -1326,7 +1355,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
                         for row in result
                     ]
         
-    return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
+    return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options, nights_options
 
 @app.callback(
     Output('new-line-chart', 'figure'),

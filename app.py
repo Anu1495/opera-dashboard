@@ -181,6 +181,7 @@ custom_colorscale = [
     [1, 'brown']
 ]
 
+
 def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
     df['created_date'] = pd.to_datetime(df['created_date'])
@@ -233,37 +234,33 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
 
     # Align all data to ensure the same shape
     refundable_data = refundable_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0)
-    # Re-align channel names and revenue data to the bookings pivot table's index and columns
     customdata_revenue = revenue_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
     channel_names = df_agg.groupby(['created_date_str', 'stay_date_str'])['booking_channel_name'].apply(lambda x: ', '.join(x.unique())).unstack().reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value='').values
 
-    # Combine custom data for hover with matching shapes
     combined_customdata = np.dstack((
-    channel_names,  # Booking channel names
-    customdata_revenue,  # Total revenue
-    refundable_data.values,
-    df_agg.pivot_table(  # Non-refundable rates
-        index="created_date_str",
-        columns="stay_date_str",
-        values="refundable_rate",  # Add the non-refundable rate to customdata
-        fill_value=0,
-        aggfunc='min'
-    ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values,
-            # Refundable rates
-    df_agg.pivot_table(  # Non-refundable rates
-        index="created_date_str",
-        columns="stay_date_str",
-        values="non_refundable_rate",  # Add the non-refundable rate to customdata
-        fill_value=0,
-        aggfunc='min'
-    ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
-))
-    # Dynamically calculate zmin and zmax for bookings, revenue, and refundable rates
+        channel_names,  
+        customdata_revenue,  
+        refundable_data.values,
+        df_agg.pivot_table(
+            index="created_date_str",
+            columns="stay_date_str",
+            values="refundable_rate",
+            fill_value=0,
+            aggfunc='min'
+        ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values,
+        df_agg.pivot_table(
+            index="created_date_str",
+            columns="stay_date_str",
+            values="non_refundable_rate",
+            fill_value=0,
+            aggfunc='min'
+        ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
+    ))
+
     bookings_max = bookings_pivot.values.max()
     revenue_max = revenue_pivot.values.max()
     max_rate_value = refundable_data.values.max()
-    
-    # Creating the booking heatmap
+
     booking_fig = go.Figure(data=go.Heatmap(
         z=bookings_pivot.values,
         x=bookings_pivot.columns,
@@ -276,101 +273,147 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
             'Total Revenue: %{customdata[1]:.2f}<br>'
         ),
         colorscale=colorscale,
-        colorbar=dict(title="Number of Bookings"),
+        colorbar=dict(
+            title="Number of Bookings",
+            orientation='h',
+            x=0.5,
+            y=-0.3,
+            len=0.6,
+            thickness=15
+        ),
         zmin=0,
         zmax=bookings_max
     ))
-    
-    # Creating the revenue heatmap
+
     revenue_fig = go.Figure(data=go.Heatmap(
         z=revenue_pivot.values,
-        x=revenue_pivot.columns,
-        y=revenue_pivot.index,
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
         customdata=combined_customdata,
         hovertemplate=(
             'Booking Date: %{y}<br>' +
             'Stay Date: %{x}<br>' +
-            'Total Revenue: %{z:.2f}<br>'
+            'Total Revenue: %{customdata[1]:.2f}<br>'
         ),
         colorscale=colorscale,
-        colorbar=dict(title="Total Revenue"),
+        colorbar=dict(
+            title="Total Revenue",
+            orientation='h',
+            x=0.5,
+            y=-0.3,
+            len=0.6,
+            thickness=15
+        ),
         zmin=0,
         zmax=revenue_max
     ))
 
-    highlight_condition_refundable = (df_agg['refundable_rate'] == df_agg['exp_rate']) & (df_agg['rate_plan_code'] == 'FLRA1')
-    highlight_condition_non_refundable = (df_agg['non_refundable_rate'] == df_agg['exp_rate']) & (df_agg['rate_plan_code'] == 'FLRA1')
+    # Initialize arrays for highlighting
+    highlight_refundable = np.zeros_like(refundable_data.values)  # For plus signs
+    highlight_non_refundable = np.zeros_like(refundable_data.values)  # For plus signs
 
-    highlighted_data_refundable = df_agg[highlight_condition_refundable]
-    highlighted_x_refundable = highlighted_data_refundable['stay_date_str']
-    highlighted_y_refundable = highlighted_data_refundable['created_date_str']
+    for idx, row in df_agg.iterrows():
+        stay_date = row['stay_date_str']
+        booking_date = row['created_date_str']
+        if row['rate_plan_code'] == 'FLRA1':
+            if row['refundable_rate'] == row['exp_rate']:
+                highlight_refundable[bookings_pivot.index.get_loc(booking_date), bookings_pivot.columns.get_loc(stay_date)] = 1
+            if row['non_refundable_rate'] == row['exp_rate']:
+                highlight_non_refundable[bookings_pivot.index.get_loc(booking_date), bookings_pivot.columns.get_loc(stay_date)] = 1
 
-    highlighted_data_non_refundable = df_agg[highlight_condition_non_refundable]
-    highlighted_x_non_refundable = highlighted_data_non_refundable['stay_date_str']
-    highlighted_y_non_refundable = highlighted_data_non_refundable['created_date_str']
-# Create the rate heatmap with updated hover template to show both rates
-    rate_fig = go.Figure(data=go.Heatmap(
-        z=refundable_data.values,  # Use refundable rates for z values
-        x=refundable_data.columns,
-        y=refundable_data.index,
-        customdata=combined_customdata,  # Use combined data for custom information
+    # Create rate heatmap with borders for highlight
+    rate_fig = go.Figure()
+
+    # Base heatmap
+    rate_fig.add_trace(go.Heatmap(
+        z=refundable_data.values,
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
+        customdata=combined_customdata,
         hovertemplate=(
             'Booking Date: %{y}<br>' +
             'Stay Date: %{x}<br>' +
-            'Refundable Rate: %{customdata[3]:.2f}<br>' +  # Use z for refundable rate
-            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'  # Use index 3 for non-refundable rate
+            'Refundable Rate: %{customdata[3]:.2f}<br>' +
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
         ),
-        colorscale=colorscale, 
-        colorbar=dict(title="Rates"),
+        colorscale=colorscale,
+        colorbar=dict(
+            title="Rate",
+            orientation='h',
+            x=0.5,
+            y=-0.3,
+            len=0.6,
+            thickness=15
+        ),
         zmin=0,
         zmax=max_rate_value
     ))
 
-    # Add a scatter plot for the non-refundable rate highlights with a solid marker on top
-    highlight_trace_refundable = go.Scatter(
-        x=highlighted_x_refundable,
-        y=highlighted_y_refundable,
-        mode='markers',
-        marker=dict(
-            size=10,  # Size of the main marker
-            color='black',  # Solid green color for main marker
-            line=dict(
-                width=2,  # Border width
-                color='red'  # Border color
-            ),
-            symbol='x',  # Cross shape for main marker
-        ),
-        name='Refundable Rate',
-        hoverinfo='x+y'
-    )
-    
-    # Add a scatter plot for the non-refundable rate highlights with a solid marker on top
-    highlight_trace_non_refundable = go.Scatter(
-        x=highlighted_x_non_refundable,
-        y=highlighted_y_non_refundable,
-        mode='markers',
-        marker=dict(
-            size=10,  # Size of the main marker
-            color='green',  # Solid green color for main marker
-            line=dict(
-                width=2,  # Border width
-                color='lightgreen'  # Border color
-            ),
-            symbol='x',  # Cross shape for main marker
-        ),
-        name='Non-Refundable Rate',
-        hoverinfo='x+y'
-    )
+    # Initialize the text array for highlights
+    highlight_text = np.empty_like(refundable_data.values, dtype=str)
 
-    # Add both scatter traces to the heatmap
-    rate_fig.add_trace(highlight_trace_refundable)
-    rate_fig.add_trace(highlight_trace_non_refundable)
+    # Fill in plus and minus signs where there are highlights
+    highlight_text[highlight_refundable == 1] = 'x'
+    highlight_text[highlight_non_refundable == 1] = 'x'
 
-    # Updating layout for both heatmaps
+        # Add heatmap for plus signs
+    rate_fig.add_trace(go.Heatmap(
+        z=np.ones_like(refundable_data.values),  # Dummy z data
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
+        text=np.where(highlight_refundable == 1, 'x', ''),  # Only plus signs
+        texttemplate='%{text}',
+        colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
+        showscale=False,
+        hoverinfo='skip',
+        textfont=dict(size=30, color='lightgreen', family='Arial Black')  # Plus signs in green
+    ))
+
+    # Add heatmap for plus signs
+    rate_fig.add_trace(go.Heatmap(
+        z=np.ones_like(refundable_data.values),  # Dummy z data
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
+        text=np.where(highlight_refundable == 1, 'x', ''),  # Only plus signs
+        texttemplate='%{text}',
+        colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
+        showscale=False,
+        hoverinfo='skip',
+        textfont=dict(size=20, color='green', family='Arial')  # Plus signs in green
+    ))
+
+
+    # Add heatmap for minus signs
+    rate_fig.add_trace(go.Heatmap(
+        z=np.ones_like(refundable_data.values),  # Dummy z data
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
+        text=np.where(highlight_non_refundable == 1, 'o', ''),  # Only minus signs
+        texttemplate='%{text}',
+        colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
+        showscale=False,
+        hoverinfo='skip',
+        textfont=dict(size=30, color='brown', family='Arial Black')  # Minus signs in red
+    ))
+
+    # Add heatmap for minus signs
+    rate_fig.add_trace(go.Heatmap(
+        z=np.ones_like(refundable_data.values),  # Dummy z data
+        x=bookings_pivot.columns,
+        y=bookings_pivot.index,
+        text=np.where(highlight_non_refundable == 1, 'o', ''),  # Only minus signs
+        texttemplate='%{text}',
+        colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
+        showscale=False,
+        hoverinfo='skip',
+        textfont=dict(size=20, color='red', family='Arial')  # Minus signs in red
+    ))
+
+
     booking_fig.update_layout(
         title={
             'text': booking_title,
-            'font': {'size': 20, 'color': 'black', 'family': 'Arial', 'weight': 'bold'},
+            'font': {'size': 20, 'color': 'black', 'family': 'Arial'},
             'x': 0.5,
             'xanchor': 'center'
         },
@@ -378,12 +421,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
         yaxis_title='Booking Date',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        height=800,
+        height=900,  # Adjust height if needed
         xaxis=dict(
             tickfont=dict(size=18),
             type='category',
             showgrid=False,
-            categoryarray=complete_date_range_str,
+            categoryarray=complete_date_range_str,  # Ensure this contains the correct date range
             gridcolor='LightGray',
             gridwidth=1          
         ),
@@ -392,11 +435,11 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
             showticklabels=True,
             type='category',
             categoryorder='array',
-            categoryarray=complete_date_range_str,
+            categoryarray=complete_date_range_str,  # Ensure this contains the correct date range
             showgrid=False,
             gridcolor='LightGray',
             gridwidth=1  
-        ),
+        ),  # Adjust margins for space, especially if colorbar is below
     )
 
     revenue_fig.update_layout(
@@ -410,7 +453,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
         yaxis_title='Booking Date',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        height=800,
+        height=900,
         xaxis=dict(
             tickfont=dict(size=18),
             type='category',
@@ -442,7 +485,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
         yaxis_title='Booking Date',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        height=800,
+        height=900,
         xaxis=dict(
             tickfont=dict(size=18),
             type='category',
@@ -461,6 +504,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
             gridcolor='LightGray',
             gridwidth=1  
         ),
+        showlegend=False
     )
 
     return booking_fig, revenue_fig, rate_fig
@@ -917,7 +961,8 @@ dcc.Tab(
      Input('heatmap2', 'clickData'),
      Input('heatmap3', 'clickData')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data):   # Default values
+def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data):
+    # Default values
     booking_heatmap = go.Figure()
     rate_heatmap = go.Figure()
     line_chart_fig = go.Figure()
@@ -929,7 +974,6 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     room_options = []
     rate_options = []
     book_options = []
-
 
     # Convert date strings to datetime.date objects
     if stay_date_start:
@@ -1005,9 +1049,9 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     if n_clicks is None:
         n_clicks = 0
 
-    booking_title = 'Booking Heatmap for Hotel {}'.format(selected_hotel)
-    revenue_title = 'Revenue Heatmap for Hotel {}'.format(selected_hotel)
-    rate_title = 'Rate Heatmap for Hotel {}'.format(selected_hotel)
+    booking_title = 'Booking Heatmap'.format(selected_hotel)
+    revenue_title = 'Revenue Heatmap'.format(selected_hotel)
+    rate_title = 'Rate Heatmap'.format(selected_hotel)
     
     # Toggle logic
     if n_clicks % 2 == 0:

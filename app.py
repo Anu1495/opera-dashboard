@@ -1073,19 +1073,18 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         fig2.update_xaxes(range=x_range)
         fig2.update_yaxes(range=y_range)
 
-    # Handle marker synchronization
     marker_data = None
     if booking_click_data:
-        stay_date = booking_click_data['points'][0]['x']
-        created_date = booking_click_data['points'][0]['y']
+        stay_date = booking_click_data['points'][0]['y']
+        created_date = booking_click_data['points'][0]['x']
         marker_data = {'stay_date': stay_date, 'created_date': created_date}
     elif revenue_click_data:
-        stay_date = revenue_click_data['points'][0]['x']
-        created_date = revenue_click_data['points'][0]['y']
+        stay_date = revenue_click_data['points'][0]['y']
+        created_date = revenue_click_data['points'][0]['x']
         marker_data = {'stay_date': stay_date, 'created_date': created_date}
     elif rate_click_data:
-        stay_date = rate_click_data['points'][0]['x']
-        created_date = rate_click_data['points'][0]['y']
+        stay_date = rate_click_data['points'][0]['y']
+        created_date = rate_click_data['points'][0]['x']
         marker_data = {'stay_date': stay_date, 'created_date': created_date}
 
     if marker_data:
@@ -1094,8 +1093,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
         # Update markers on booking heatmap
         fig1.add_trace(go.Scatter(
-            x=[stay_date],
-            y=[created_date],
+            x=[created_date],
+            y=[stay_date],
             mode='markers',
             marker=dict(
                 color='black',
@@ -1108,8 +1107,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
         # Update markers on revenue heatmap
         fig2.add_trace(go.Scatter(
-            x=[stay_date],
-            y=[created_date],
+            x=[created_date],
+            y=[stay_date],
             mode='markers',
             marker=dict(
                 color='black',

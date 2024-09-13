@@ -10,7 +10,6 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
-
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -222,7 +221,7 @@ custom_colorscale = [
     [1, 'brown']
 ]
 
-def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, selected_channels):
+def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, selected_channels, checkbox_values):
     # Fill missing values and convert date columns to datetime format
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
     df['created_date'] = pd.to_datetime(df['created_date'])
@@ -246,18 +245,18 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     df_agg['created_date_str'] = df_agg['created_date'].dt.strftime('%Y-%m-%d')
     df_agg['stay_date_str'] = df_agg['stay_date'].dt.strftime('%Y-%m-%d')
 
-    # Generate a complete date range for both created_date and stay_date
-    all_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['stay_date'].max())
-    all_created_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['created_date'].max())
-    
-    # Create a DataFrame with all combinations of created_date and stay_date
-    date_combinations = pd.MultiIndex.from_product([all_created_dates, all_dates], names=['created_date', 'stay_date']).to_frame(index=False)
+    # Use the actual range of dates in the dataset
+    actual_created_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['created_date'].max())
+    actual_stay_dates = pd.date_range(start=df_agg['stay_date'].min(), end=df_agg['stay_date'].max())
 
     # Merge with aggregated data to ensure all combinations are included
+    date_combinations = pd.MultiIndex.from_product([actual_created_dates, actual_stay_dates], names=['created_date', 'stay_date']).to_frame(index=False)
+
+    # Merge date_combinations with the aggregated data
     df_full = pd.merge(date_combinations, df_agg, on=['created_date', 'stay_date'], how='left').fillna({
         'number_of_bookings': 0, 
         'total_revenue': 0,
-        'refundable_rate1': 0,  # Ensure 'refundable_rate1' is also filled
+        'refundable_rate1': 0,  
         'refundable_rate': 0,
         'non_refundable_rate': 0
     })
@@ -266,7 +265,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     df_full['created_date_str'] = df_full['created_date'].dt.strftime('%Y-%m-%d')
     df_full['stay_date_str'] = df_full['stay_date'].dt.strftime('%Y-%m-%d')
 
-    # Pivot tables for bookings, revenue, and refundable rates
+    # Pivot tables
     bookings_pivot = df_full.pivot_table(
         index="stay_date_str",
         columns="created_date_str",
@@ -282,7 +281,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         fill_value=0,
         aggfunc='sum'
     )
-
+    
     bookings_pivot_replaced = bookings_pivot.replace(0, pd.NA)
     average_revenue_per_booking = revenue_pivot / bookings_pivot_replaced
 
@@ -358,8 +357,25 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         zmax=bookings_max
     ))
 
+    # Pivot 'non_refundable_rate' to match 'refundable_data'
+    non_refundable_pivot = df_agg.pivot_table(
+        index="stay_date_str",
+        columns="created_date_str",
+        values="non_refundable_rate",
+        fill_value=0,
+        aggfunc='min'
+    ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0)
+
+    min_rates = np.minimum(refundable_pivot.values, non_refundable_pivot.values)
+    filled_avg_revenue = average_revenue_per_booking.fillna(0).values
+    filled_min_rates = np.nan_to_num(min_rates)
+
+    # Create the border mask by comparing the filled arrays
+    border_mask = filled_avg_revenue > filled_min_rates
+
+    # Create the base heatmap figure
     revenue_fig = go.Figure(data=go.Heatmap(
-        z=average_revenue_per_booking.values,
+        z=filled_avg_revenue,
         x=average_revenue_per_booking.columns,
         y=average_revenue_per_booking.index,
         customdata=combined_customdata,
@@ -369,9 +385,9 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
             'Total Number of Bookings:  %{customdata[5]:.2f}<br>' + 
             'Total Revenue: %{customdata[1]:.2f}<br>' +
             'ADR: %{z}<br><extra></extra>' +
-            'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
-            'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
-            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'   # Correct access to non-refundable rat
+            'Channel Names: %{customdata[0]}<br>' +
+            'Refundable Rate: %{customdata[2]:.2f}<br>' +
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
         ),
         colorscale=colorscale,
         colorbar=dict(
@@ -383,8 +399,21 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
             thickness=15
         ),
         zmin=0,
-        zmax=max_rate_value
+        zmax=max_rate_value,
     ))
+
+    # Check if the checkbox is selected to add the black markers
+    if 'show_markers' in checkbox_values:
+        border_points = np.where(border_mask)
+        revenue_fig.add_trace(go.Scatter(
+            x=average_revenue_per_booking.columns[border_points[1]],
+            y=average_revenue_per_booking.index[border_points[0]],
+            mode='markers',
+            marker=dict(color='black', size=4, symbol='square'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
 
     # Initialize arrays for highlighting
     highlight_refundable = np.zeros_like(refundable_data.values)  # For plus signs
@@ -882,6 +911,20 @@ app.layout = dbc.Container([
 dcc.Tabs([
     dcc.Tab(label='Main Dashboard', children=[
         # Row for heatmaps
+        dbc.Row(
+                dbc.Col(
+                    dcc.Checklist(
+                    id='adr-checkbox',
+                    options=[{'label': 'ADR > Rate', 'value': 'show_markers'}],
+                    value=[],
+                    inline=True
+                ), 
+                width=12, 
+                style={'textAlign': 'right'}
+            ), 
+            style={'marginTop': '20px'}
+        ),
+        
         dbc.Row([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),
             dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px', 'marginBottom': '10px'}), width=6),  # Set fixed height
@@ -889,7 +932,9 @@ dcc.Tabs([
             dbc.Col(dcc.Graph(id='heatmap-graph', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
     
         ], style={'marginBottom': '40px'}),  # Set fixed height),
-        # Add margin to this row to increase space between heatmaps and the line chart
+
+        
+
         dbc.Row([ html.H2('Booking Trend'),
             dbc.Col(dcc.Graph(id='line-chart', style={'height': '600px', 'marginTop': '80px'}), width=12)
         ], style={'marginTop': '100px'}),  # Set fixed height
@@ -967,6 +1012,7 @@ dcc.Tabs([
             )
         ], style={'width': '100%', 'padding': '10px'}),
 
+   
         # Bar Chart Section
         dbc.Row([ html.H2('Revenue Trend'),
             dbc.Col(dcc.Graph(id='bar-chart', style={'height': '600px'}), width=12)
@@ -1042,9 +1088,10 @@ dcc.Tab(
      Input('heatmap2', 'clickData'),
      Input('heatmap3', 'clickData'),
      Input('company-dropdown', 'value'),
-     Input('night-dropdown', 'value')]
+     Input('night-dropdown', 'value'),
+     Input('adr-checkbox', 'value')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights):
+def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights, checkbox_values):
     # Default values
     booking_heatmap = go.Figure()
     rate_heatmap = go.Figure()
@@ -1157,11 +1204,11 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     # Toggle logic
     # Toggle logic
     if n_clicks % 2 == 0:
-        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels)
+        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels, checkbox_values)
         fig1 = booking_heatmap
         fig2 = revenue_heatmap
     else:
-        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels)
+        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels, checkbox_values)
         fig1 = booking_heatmap
         fig2 = rate_heatmap
 
@@ -1428,6 +1475,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
                         {'first_name': row[0], 'last_name': row[1], 'room_number': row[2], 'hotel_id': row[3]}
                         for row in result
                     ]
+        
         
     return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options, company_options, nights_options
 

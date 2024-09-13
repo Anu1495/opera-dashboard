@@ -159,7 +159,6 @@ GROUP BY
 
 # Fetch initial data
 df = pd.read_sql_query(query, engine)
-
 ratequery = """
 WITH rate_updates AS (
     SELECT DISTINCT ON (u.hotel_id, date_update::date)
@@ -534,15 +533,6 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         showlegend=False
     )
 
-            # Check the shape of combined_customdata to ensure it is correctly formatted
-    print("Sample combined_customdata for first row, first column:")
-    print("Channel Names:", combined_customdata[0, 0, 0])
-    print("Total Revenue:", combined_customdata[0, 0, 1])
-    print("Refundable Rate:", combined_customdata[0, 0, 2])
-    print("Min Refundable Rate:", combined_customdata[0, 0, 3])
-    print("Non-Refundable Rate:", combined_customdata[0, 0, 4])
-    # print a small sample for inspection
-
 
     return booking_fig, revenue_fig, rate_fig
 
@@ -623,7 +613,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         b.rate_plan_code, b.booking_status,
         u.report_date, b.created_date,
         b.booking_channel_name,
-        r.stay_date, b.date_difference, b.nights,
+        r.stay_date, b.date_difference, 
         b.stay_date, 
         b.total_revenue_x, b.exp_rate,
         r.adultcount, 
@@ -778,7 +768,7 @@ app.layout = dbc.Container([
                 clearable=False,
                 placeholder='Select a hotel'
             ),
-        ], width=1),
+        ], width=2),
 
         dbc.Col([
             dcc.Dropdown(
@@ -852,7 +842,7 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select Company'  # Placeholder text
             ),
-        ], width=3),
+        ], width=2),
 
         dbc.Col([
             dcc.Dropdown(
@@ -1019,7 +1009,6 @@ dcc.Tab(
 ])
 ], fluid=True)
 
-
 @app.callback(
     [Output('heatmap1', 'figure'),
      Output('heatmap2', 'figure'),
@@ -1164,6 +1153,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     revenue_title = 'Revenue Heatmap'.format(selected_hotel)
     rate_title = 'Rate Heatmap'.format(selected_hotel)
     
+    # Toggle logic
     # Toggle logic
     if n_clicks % 2 == 0:
         booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels)
@@ -1400,16 +1390,15 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
             legend=dict(
             font=dict(size=16),
             ))
-
-      # Fetch booking details
+ # Fetch booking details
         booking_details_df = fetch_booking_details(
             stay_date, created_date, selected_hotel, 
             selected_channels if selected_channels else [], 
             selected_rooms if selected_rooms else [], 
             selected_rate_plan if selected_rate_plan else [], 
             selected_booking_status if selected_booking_status else [],
-             selected_company if selected_company else [],
-             selected_nights if selected_nights else [] 
+            selected_company if selected_company else [],
+            selected_nights if selected_nights else [] 
         )
         booking_details_data = booking_details_df.to_dict('records')
 
@@ -1446,8 +1435,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     [Input('hotel-dropdown', 'value'),
      Input('line-chart-stay-date-picker', 'date'),
      Input('channel-dropdown', 'value'),
-     Input('rate-dropdown', 'value'),
-     ]  # Add rate dropdown input
+     Input('rate-dropdown', 'value'),]  # Add rate dropdown input
 )
 def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels, selected_rate_plan):
     # Check if stay date and hotel are selected

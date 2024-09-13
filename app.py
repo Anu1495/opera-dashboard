@@ -58,7 +58,7 @@ ota_rooms AS (
 booking AS (
     SELECT
         b.booking_id, ROUND(COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)) * 1.2) AS exp_rate, 
-        b.hotel_id,
+        b.hotel_id, b.company_name,
         b.room_id,
         COUNT(b.booking_reference) AS number_of_bookings,
         b.created_date::date AS created_date,
@@ -89,7 +89,7 @@ booking AS (
     WHERE dt."date" >= '2024-01-01' AND b.created_date >= '2024-01-01'
         AND b.hotel_id = '6'
     GROUP BY 
-        b.booking_id, br.total_revenue,
+        b.booking_id, br.total_revenue, b.company_name,
         b.hotel_id, 
         b.room_id,
         b.created_date, 
@@ -111,9 +111,9 @@ booking AS (
         p.last_name
 )
 SELECT
-    u.hotel_id, b.room_name, b.exp_rate,
+    u.hotel_id, b.room_name, b.exp_rate, b.company_name,
     b.rate_plan_code, 
-    b.created_date, b.booking_status,
+    b.created_date::date as created_date, b.booking_status,
     b.booking_id, b.nights,
     u.report_date::date,
     b.booking_channel_name,
@@ -140,9 +140,9 @@ JOIN caldate dt ON b.check_in <= dt."date"
 WHERE dt.date = r.stay_date::date AND r.stay_date >= '2024-01-01'
     AND b.adults = r.adultcount
 GROUP BY
-    u.hotel_id, b.room_name, b.exp_rate,
+    u.hotel_id, b.room_name, b.exp_rate, b.company_name,
     b.rate_plan_code, b.booking_status,
-    b.created_date,  
+    b.created_date::date,  
     b.booking_id, b.nights,
     u.report_date,
     r.stay_date::date,
@@ -159,6 +159,49 @@ GROUP BY
 
 # Fetch initial data
 df = pd.read_sql_query(query, engine)
+
+ratequery = """
+WITH rate_updates AS (
+    SELECT DISTINCT ON (u.hotel_id, date_update::date)
+        u.hotel_id,
+        u.rate_update_id,
+        date_update::date AS report_date
+    FROM rate_update u
+    WHERE u.hotel_id = '6'
+        AND u.date_update::date >= '2024-01-01'
+        AND u.date_update::date < CURRENT_DATE
+    ORDER BY u.hotel_id, date_update::date, date_update DESC
+),
+ota_rooms AS (
+    SELECT DISTINCT
+        o.ota_room_id,
+        COALESCE(rc."name", r."name") AS "name"
+    FROM ota_room o
+    JOIN room r ON r.room_id = o.room_id
+    LEFT JOIN room_category rc ON rc.room_category_id = r.room_category_id
+    WHERE o.hotel_id = '6'
+)
+SELECT
+    u.hotel_id,
+    u.report_date,
+    r.stay_date::date as rate_date,
+    r.refundable,
+    r.adultcount,
+    MIN(r.amount)::numeric(18,2) AS min_rate,
+    o.name,
+    MIN(CASE WHEN r.refundable THEN r.amount END) AS refundable_rate,
+    MIN(CASE WHEN NOT r.refundable THEN r.amount END) AS non_refundable_rate
+FROM rate_new r
+JOIN rate_updates u ON r.rate_update_id = u.rate_update_id
+JOIN ota_rooms o ON o.ota_room_id = r.ota_room_id
+WHERE r.adultcount = 2
+GROUP BY
+    u.hotel_id, u.report_date, r.stay_date, o.name, r.refundable, r.adultcount
+"""
+
+# Fetch the data
+df1 = pd.read_sql_query(ratequery, engine)
+
 
 # Close the connection
 engine.dispose()
@@ -181,12 +224,16 @@ custom_colorscale = [
     [1, 'brown']
 ]
 
-
-def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
+def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, selected_channels):
+    # Fill missing values and convert date columns to datetime format
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
     df['created_date'] = pd.to_datetime(df['created_date'])
     df['stay_date'] = pd.to_datetime(df['stay_date'])
-
+    
+    # Apply channel filter
+    if selected_channels:
+        df = df[df['booking_channel_name'].isin(selected_channels)]
+    
     # Generate a complete date range for the booking dates
     complete_date_range = pd.date_range(start=df['created_date'].min(), end=df['created_date'].max())
     complete_date_range_str = complete_date_range.strftime('%Y-%m-%d')
@@ -208,55 +255,64 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
 
     # Pivot tables for bookings, revenue, and refundable rates
     bookings_pivot = df_agg.pivot_table(
-        index="stay_date_str",  # Switch index and columns
+        index="stay_date_str",
         columns="created_date_str",
         values="number_of_bookings",
         fill_value=0,
         aggfunc='sum'
     )
-    
+
     revenue_pivot = df_agg.pivot_table(
-        index="stay_date_str",  # Switch index and columns
+        index="stay_date_str",
         columns="created_date_str",
         values="total_revenue",
         fill_value=0,
         aggfunc='sum'
     )
-    
-    # Pivot table for the maximum refundable or non-refundable rate
+
+    bookings_pivot_replaced = bookings_pivot.replace(0, pd.NA)
+    average_revenue_per_booking = revenue_pivot / bookings_pivot_replaced
+
+    # Replace NaN values with 0 for the heatmap
+    revenue_fig = average_revenue_per_booking.fillna(0)
+
     refundable_pivot = df_agg.pivot_table(
-        index="stay_date_str",  # Switch index and columns
+        index="stay_date_str",
         columns="created_date_str",
         values="refundable_rate1",
         fill_value=0,
         aggfunc='min'
     )
+    
+        # Align all data to ensure the same shape
+    channel_names = df_agg.groupby(['stay_date_str', 'created_date_str'])['booking_channel_name']\
+        .apply(lambda x: ', '.join(x.unique())).unstack()\
+        .reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value='').values
 
-    # Align all data to ensure the same shape
-    refundable_data = refundable_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0)
     customdata_revenue = revenue_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
-    channel_names = df_agg.groupby(['stay_date_str', 'created_date_str'])['booking_channel_name'].apply(lambda x: ', '.join(x.unique())).unstack().reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value='').values
+    refundable_data = refundable_pivot.reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0)
 
+    # Rebuild combined_customdata with filtered data to ensure correct alignment
     combined_customdata = np.dstack((
-        channel_names,  
-        customdata_revenue,  
+        channel_names,
+        customdata_revenue,
         refundable_data.values,
         df_agg.pivot_table(
-            index="stay_date_str",  # Switch index and columns
+            index="stay_date_str",
             columns="created_date_str",
             values="refundable_rate",
             fill_value=0,
             aggfunc='min'
         ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values,
         df_agg.pivot_table(
-            index="stay_date_str",  # Switch index and columns
+            index="stay_date_str",
             columns="created_date_str",
             values="non_refundable_rate",
             fill_value=0,
             aggfunc='min'
         ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
     ))
-
+    
     bookings_max = bookings_pivot.values.max()
     revenue_max = revenue_pivot.values.max()
     max_rate_value = refundable_data.values.max()
@@ -270,7 +326,10 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
             'Booking Date: %{x}<br>' +
             'Stay Date: %{y}<br>' +
             'Total Number of Bookings: %{z}<br>' +
-            'Total Revenue: %{customdata[1]:.2f}<br>'
+            'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
+            'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
+            'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>' # Correct access to non-refundable rate
         ),
         colorscale=colorscale,
         colorbar=dict(
@@ -286,14 +345,18 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
     ))
 
     revenue_fig = go.Figure(data=go.Heatmap(
-        z=revenue_pivot.values,
-        x=revenue_pivot.columns,
-        y=revenue_pivot.index,
+        z=average_revenue_per_booking.values,
+        x=average_revenue_per_booking.columns,
+        y=average_revenue_per_booking.index,
         customdata=combined_customdata,
         hovertemplate=(
             'Booking Date: %{x}<br>' +
             'Stay Date: %{y}<br>' +
-            'Total Revenue: %{customdata[1]:.2f}<br>'
+            'ADR: %{z}<br><extra></extra>' +
+            'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
+            'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
+            'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'   # Correct access to non-refundable rat
         ),
         colorscale=colorscale,
         colorbar=dict(
@@ -305,7 +368,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
             thickness=15
         ),
         zmin=0,
-        zmax=revenue_max
+        zmax=max_rate_value
     ))
 
     # Initialize arrays for highlighting
@@ -329,14 +392,16 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
     # Base heatmap
     rate_fig.add_trace(go.Heatmap(
         z=refundable_data.values,
-        x=bookings_pivot.columns,
-        y=bookings_pivot.index,
+        x=refundable_data.columns,
+        y=refundable_data.index,
         customdata=combined_customdata,
         hovertemplate=(
             'Stay Date: %{x}<br>' +
-            'Booking Date: %{y}<br>' +
-            'Refundable Rate: %{customdata[3]:.2f}<br>' +
-            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
+            'Booking Date: %{y}<br><extra></extra>' +            
+            'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
+            'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
+            'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'  # Correct access to non-refundable rate
         ),
         colorscale=colorscale,
         colorbar=dict(
@@ -469,14 +534,25 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale):
         showlegend=False
     )
 
+            # Check the shape of combined_customdata to ensure it is correctly formatted
+    print("Sample combined_customdata for first row, first column:")
+    print("Channel Names:", combined_customdata[0, 0, 0])
+    print("Total Revenue:", combined_customdata[0, 0, 1])
+    print("Refundable Rate:", combined_customdata[0, 0, 2])
+    print("Min Refundable Rate:", combined_customdata[0, 0, 3])
+    print("Non-Refundable Rate:", combined_customdata[0, 0, 4])
+    # print a small sample for inspection
+
+
     return booking_fig, revenue_fig, rate_fig
 
 
-def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_nights):
+def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_company, selected_nights):
     channel_filter = f"AND b.booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
     rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
     book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
+    company_filter = f"AND b.company_name IN ({', '.join(f'\'{company}\'' for company in selected_company)})" if selected_company else ""
     nights_filter = f"AND b.nights IN ({', '.join(f'\'{night}\'' for night in selected_nights)})" if selected_nights else ""
     detail_query = f"""
     WITH rate_updates AS (
@@ -514,7 +590,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
             b.booking_reference, 
             EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
             b.booking_channel_name,
-            b.booking_status, 
+            b.booking_status, b.company_name,
             b.adults,
             b.rate_plan_code,
             b.nights,
@@ -539,14 +615,15 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
                 {room_filter}
                 {rate_plan_filter}
                 {book_status_filter}
+                {company_filter}
                 {nights_filter}
     )
     SELECT 
-        u.hotel_id, b.room_name, b.room_code,
+        u.hotel_id, b.room_name, b.room_code, b.company_name,
         b.rate_plan_code, b.booking_status,
         u.report_date, b.created_date,
         b.booking_channel_name,
-        r.stay_date, b.date_difference, 
+        r.stay_date, b.date_difference, b.nights,
         b.stay_date, 
         b.total_revenue_x, b.exp_rate,
         r.adultcount, 
@@ -572,7 +649,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
         u.report_date, b.booking_status,
         b.rate_plan_code, b.created_date,
         r.stay_date, 
-        b.adults, 
+        b.adults, b.company_name,
         o.name, 
         b.booking_channel_name, b.exp_rate,
         b.total_revenue_x,
@@ -701,7 +778,7 @@ app.layout = dbc.Container([
                 clearable=False,
                 placeholder='Select a hotel'
             ),
-        ], width=2),
+        ], width=1),
 
         dbc.Col([
             dcc.Dropdown(
@@ -717,7 +794,7 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select booking channels'
             ),
-        ], width=2),
+        ], width=3),
 
         dbc.Col([
             dcc.Dropdown(
@@ -731,7 +808,7 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select room types'
             ),
-        ], width=2),
+        ], width=1),
 
         dbc.Col([
             dcc.Dropdown(
@@ -747,7 +824,35 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select rate codes'  # Placeholder text
             ),
-        ], width=2),
+        ], width=1),
+
+        dbc.Col(
+            dcc.Dropdown(
+                id='rate-type-dropdown',
+                options=[
+                    {'label': 'Refundable Rate', 'value': 'refundable_rate'},
+                    {'label': 'Non-Refundable Rate', 'value': 'non_refundable_rate'}
+                ],
+                value='refundable_rate'
+            ),
+            width=1
+        ),
+        
+        dbc.Col([
+            dcc.Dropdown(
+                id='company-dropdown',
+                options=[],  # Initially empty
+                value=[], 
+                multi=True,
+                style={
+                    'width': '100%', 
+                    'fontSize': '16px',  # Font size
+                    'fontFamily': 'Arial',  # Font family
+                    'color': 'black'  # Font color
+                },
+                placeholder='Select Company'  # Placeholder text
+            ),
+        ], width=3),
 
         dbc.Col([
             dcc.Dropdown(
@@ -761,10 +866,10 @@ app.layout = dbc.Container([
                     'fontFamily': 'Arial',  # Font family
                     'color': 'black'  # Font color
                 },
-                placeholder='Select Booking Status'  # Placeholder text
+                placeholder='Select Status'  # Placeholder text
             ),
-        ], width=2),
-
+        ], width=1),
+        
         dbc.Col([
             dcc.Dropdown(
                 id='night-dropdown',
@@ -779,7 +884,8 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select Nights'  # Placeholder text
             ),
-        ], width=2),
+        ], width=1),
+
     ], style={'marginBottom': '20px'}),
 
 dcc.Tabs([
@@ -787,13 +893,15 @@ dcc.Tabs([
         # Row for heatmaps
         dbc.Row([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),
-            dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px'}), width=6),  # Set fixed height
-            dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6)
+            dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px', 'marginBottom': '10px'}), width=6),  # Set fixed height
+            dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6),
+            dbc.Col(dcc.Graph(id='heatmap-graph', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
+    
         ], style={'marginBottom': '40px'}),  # Set fixed height),
         # Add margin to this row to increase space between heatmaps and the line chart
         dbc.Row([ html.H2('Booking Trend'),
-            dbc.Col(dcc.Graph(id='line-chart', style={'height': '800px'}), width=12)
-        ], style={'marginTop': '40px'}),  # Set fixed height
+            dbc.Col(dcc.Graph(id='line-chart', style={'height': '600px', 'marginTop': '80px'}), width=12)
+        ], style={'marginTop': '100px'}),  # Set fixed height
 
         # Booking Details Section
         html.Div([
@@ -835,7 +943,7 @@ dcc.Tabs([
                     )
                 ]
             )
-        ], style={'width': '100%', 'padding': '10px'}),
+        ], style={'width': '100%', 'padding': '10px', 'marginTop': '120px'}),
 
         # Additional Booking Details Section
         html.Div([
@@ -923,6 +1031,7 @@ dcc.Tab(
      Output('room-dropdown', 'options'),
      Output('rate-dropdown', 'options'),
      Output('book-dropdown', 'options'),
+     Output('company-dropdown', 'options'),
      Output('night-dropdown', 'options')],
     [Input('hotel-dropdown', 'value'),
      Input('channel-dropdown', 'value'),
@@ -942,9 +1051,10 @@ dcc.Tab(
      Input('heatmap1', 'clickData'),
      Input('heatmap2', 'clickData'),
      Input('heatmap3', 'clickData'),
+     Input('company-dropdown', 'value'),
      Input('night-dropdown', 'value')]
 )
-def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_nights):
+def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights):
     # Default values
     booking_heatmap = go.Figure()
     rate_heatmap = go.Figure()
@@ -957,7 +1067,9 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     room_options = []
     rate_options = []
     book_options = []
+    company_options = []
     nights_options = []
+
     # Convert date strings to datetime.date objects
     if stay_date_start:
         stay_date_start = datetime.strptime(stay_date_start, '%Y-%m-%d').date()
@@ -1000,6 +1112,14 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
 
     if selected_rate_plan:
         filtered_df = filtered_df[filtered_df['rate_plan_code'].isin(selected_rate_plan)]
+    
+    if 'company_name' in filtered_df.columns:
+        companies = filtered_df['company_name'].dropna().unique()
+        sorted_company = sorted([company for company in companies if company])
+        company_options = [{'label': company, 'value': company} for company in sorted_company]
+
+    if selected_company:
+        filtered_df = filtered_df[filtered_df['company_name'].isin(selected_company)]
 
     if 'room_name' in filtered_df.columns:
         rooms = filtered_df['room_name'].dropna().unique()
@@ -1046,11 +1166,11 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     
     # Toggle logic
     if n_clicks % 2 == 0:
-        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale)
+        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels)
         fig1 = booking_heatmap
         fig2 = revenue_heatmap
     else:
-        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale)
+        booking_heatmap, revenue_heatmap, rate_heatmap = create_heatmaps(filtered_df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels)
         fig1 = booking_heatmap
         fig2 = rate_heatmap
 
@@ -1073,6 +1193,7 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
         fig2.update_xaxes(range=x_range)
         fig2.update_yaxes(range=y_range)
 
+    # Handle marker synchronization
     marker_data = None
     if booking_click_data:
         stay_date = booking_click_data['points'][0]['y']
@@ -1287,7 +1408,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
             selected_rooms if selected_rooms else [], 
             selected_rate_plan if selected_rate_plan else [], 
             selected_booking_status if selected_booking_status else [],
-            selected_nights if selected_nights else []
+             selected_company if selected_company else [],
+             selected_nights if selected_nights else [] 
         )
         booking_details_data = booking_details_df.to_dict('records')
 
@@ -1317,14 +1439,15 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
                         for row in result
                     ]
         
-    return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options, nights_options
+    return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options, company_options, nights_options
 
 @app.callback(
     Output('new-line-chart', 'figure'),
     [Input('hotel-dropdown', 'value'),
      Input('line-chart-stay-date-picker', 'date'),
      Input('channel-dropdown', 'value'),
-     Input('rate-dropdown', 'value')]  # Add rate dropdown input
+     Input('rate-dropdown', 'value'),
+     ]  # Add rate dropdown input
 )
 def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels, selected_rate_plan):
     # Check if stay date and hotel are selected
@@ -1416,6 +1539,145 @@ def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels,
     )
 
     return new_line_chart_fig
+@app.callback(
+    Output('heatmap-graph', 'figure'),
+    [Input('hotel-dropdown', 'value'),
+     Input('rate-type-dropdown', 'value'),
+     Input('stay-date-picker', 'start_date'),
+     Input('stay-date-picker', 'end_date'),
+     Input('created-date-picker', 'start_date'),
+     Input('created-date-picker', 'end_date')]
+)
+def update_heatmap(selected_hotel, rate_type, stay_date_start, stay_date_end, created_date_start, created_date_end):
+    # Convert date strings to datetime.date objects if they are not None
+    stay_date_start = pd.to_datetime(stay_date_start) if stay_date_start else None
+    stay_date_end = pd.to_datetime(stay_date_end) if stay_date_end else None
+    created_date_start = pd.to_datetime(created_date_start) if created_date_start else None
+    created_date_end = pd.to_datetime(created_date_end) if created_date_end else None
+
+    # Adjust the SQL query to include date range filters
+    ratequery = """
+    WITH rate_updates AS (
+        SELECT DISTINCT ON (u.hotel_id, date_update::date)
+            u.hotel_id,
+            u.rate_update_id,
+            date_update::date AS report_date
+        FROM rate_update u
+        WHERE u.hotel_id = %s
+            AND u.date_update::date BETWEEN %s AND %s
+        ORDER BY u.hotel_id, date_update::date, date_update DESC
+    ),
+    ota_rooms AS (
+        SELECT DISTINCT
+            o.ota_room_id,
+            COALESCE(rc."name", r."name") AS "name"
+        FROM ota_room o
+        JOIN room r ON r.room_id = o.room_id
+        LEFT JOIN room_category rc ON rc.room_category_id = r.room_category_id
+        WHERE o.hotel_id = %s
+    )
+    SELECT
+        u.hotel_id,
+        u.report_date,
+        r.stay_date::date AS rate_date,
+        r.refundable,
+        r.adultcount,
+        MIN(r.amount)::numeric(18,2) AS min_rate,
+        o.name,
+        MIN(CASE WHEN r.refundable THEN r.amount END) AS refundable_rate,
+        MIN(CASE WHEN NOT r.refundable THEN r.amount END) AS non_refundable_rate
+    FROM rate_new r
+    JOIN rate_updates u ON r.rate_update_id = u.rate_update_id
+    JOIN ota_rooms o ON o.ota_room_id = r.ota_room_id
+    WHERE r.adultcount = 2
+    AND r.stay_date::date BETWEEN %s AND %s
+    GROUP BY
+        u.hotel_id, u.report_date, r.stay_date, o.name, r.refundable, r.adultcount
+    """
+
+    # Fetch data based on selected hotel and date filters
+    df1 = pd.read_sql_query(ratequery, engine, params=(selected_hotel, created_date_start, created_date_end, selected_hotel, stay_date_start, stay_date_end))
+
+    # Ensure date columns are in datetime format
+    df1['report_date'] = pd.to_datetime(df1['report_date'])
+    df1['rate_date'] = pd.to_datetime(df1['rate_date'])
+
+    # Compute the selected rate type
+    if rate_type == 'refundable_rate':
+        df1['mean_rate'] = df1['refundable_rate']
+    else:
+        df1['mean_rate'] = df1['non_refundable_rate']
+
+    # Determine the minimum and maximum dates in the dataset
+    min_report_date = df1['report_date'].min()
+    max_report_date = df1['report_date'].max()
+    min_rate_date = df1['rate_date'].min()
+    max_rate_date = df1['rate_date'].max()
+
+    # Generate complete date ranges based on min and max dates
+    complete_report_dates = pd.date_range(start=min_report_date, end=max_report_date, freq='D')
+    complete_rate_dates = pd.date_range(start=min_rate_date, end=max_rate_date, freq='D')
+
+    # Create pivot table for the selected rate type with all date ranges included
+    pivot_table = df1.pivot_table(
+        index='rate_date',
+        columns='report_date',
+        values='mean_rate',
+        fill_value=0
+    ).reindex(index=complete_rate_dates, columns=complete_report_dates, fill_value=0)
+
+    # Convert the complete date ranges to strings for consistent axis formatting
+    complete_report_dates_str = complete_report_dates.strftime('%Y-%m-%d')
+    complete_rate_dates_str = complete_rate_dates.strftime('%Y-%m-%d')
+
+    # Create the heatmap
+    if pivot_table.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title='No Data Available',
+            xaxis_title='Report Date',
+            yaxis_title='Stay Date'
+        )
+    else:
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot_table.values,
+            x=complete_report_dates_str,
+            y=complete_rate_dates_str,
+            colorscale=custom_colorscale,
+            colorbar=dict(title='Rate'),
+            zmin=0,
+            zmax=pivot_table.values.max()
+        ))
+
+        fig.update_layout(
+            title=f'{rate_type.replace("_", " ").title()} Heatmap',
+            xaxis_title='Report Date',
+            yaxis_title='Stay Date',
+            xaxis=dict(
+                tickfont=dict(size=18),
+                type='category',
+                showgrid=False,
+                categoryarray=complete_report_dates_str,
+                gridcolor='LightGray',
+                gridwidth=1
+            ),
+            yaxis=dict(
+                tickfont=dict(size=18),
+                showticklabels=True,
+                type='category',
+                categoryorder='array',
+                categoryarray=complete_rate_dates_str,
+                showgrid=False,
+                gridcolor='LightGray',
+                gridwidth=1
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            height=900,
+            showlegend=False
+        )
+
+    return fig
 
 if __name__ == '__main__':
     serve(app.server, host='0.0.0.0', port=8050)

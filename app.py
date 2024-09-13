@@ -439,7 +439,21 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     highlight_text[highlight_refundable == 1] = 'x'
     highlight_text[highlight_non_refundable == 1] = '0'
 
-    for text, color, highlight_array in [('x', 'green', highlight_refundable), ('o', 'red', highlight_non_refundable)]:
+    for text, color, highlight_array in [('x', 'lightgreen', highlight_refundable), ('x', 'yellow', highlight_non_refundable)]:
+        rate_fig.add_trace(go.Heatmap(
+            z=refundable_data.values,  # Dummy z data
+            x=bookings_pivot.columns,
+            y=bookings_pivot.index,
+            text=np.where(highlight_array == 1, text, ''),  # Apply plus or minus signs
+            texttemplate='%{text}',
+            colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
+            showscale=False,
+            hoverinfo='skip',
+            textfont=dict(size=30, color=color, family='Arial Black')  # Color for the signs
+        ))
+
+
+    for text, color, highlight_array in [('x', 'green', highlight_refundable), ('x', 'red', highlight_non_refundable)]:
         rate_fig.add_trace(go.Heatmap(
             z=refundable_data.values,  # Dummy z data
             x=bookings_pivot.columns,

@@ -211,7 +211,6 @@ server = Flask(__name__)
 # Create the Dash app
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# Adjusted custom color scale to ensure 0.0 is white and only starts transitioning at a higher point
 # Create a custom color scale to enhance color differentiation
 custom_colorscale = [
     [0, 'white'],
@@ -233,10 +232,6 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     if selected_channels:
         df = df[df['booking_channel_name'].isin(selected_channels)]
     
-    # Generate a complete date range for the booking dates
-    complete_date_range = pd.date_range(start=df['created_date'].min(), end=df['created_date'].max())
-    complete_date_range_str = complete_date_range.strftime('%Y-%m-%d')
-
     # Aggregating data
     df_agg = df.groupby(['created_date', 'stay_date', 'booking_channel_name', 'rate_plan_code', 'exp_rate']).agg({
         'number_of_bookings': 'sum',
@@ -248,12 +243,31 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     # Calculate the maximum rate between refundable and non-refundable rates
     df_agg['refundable_rate1'] = df_agg[['refundable_rate', 'non_refundable_rate']].max(axis=1)
 
-    # Convert dates to strings for categorical handling
     df_agg['created_date_str'] = df_agg['created_date'].dt.strftime('%Y-%m-%d')
     df_agg['stay_date_str'] = df_agg['stay_date'].dt.strftime('%Y-%m-%d')
 
+    # Generate a complete date range for both created_date and stay_date
+    all_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['stay_date'].max())
+    all_created_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['created_date'].max())
+    
+    # Create a DataFrame with all combinations of created_date and stay_date
+    date_combinations = pd.MultiIndex.from_product([all_created_dates, all_dates], names=['created_date', 'stay_date']).to_frame(index=False)
+
+    # Merge with aggregated data to ensure all combinations are included
+    df_full = pd.merge(date_combinations, df_agg, on=['created_date', 'stay_date'], how='left').fillna({
+        'number_of_bookings': 0, 
+        'total_revenue': 0,
+        'refundable_rate1': 0,  # Ensure 'refundable_rate1' is also filled
+        'refundable_rate': 0,
+        'non_refundable_rate': 0
+    })
+
+    # Convert dates to strings for pivot tables
+    df_full['created_date_str'] = df_full['created_date'].dt.strftime('%Y-%m-%d')
+    df_full['stay_date_str'] = df_full['stay_date'].dt.strftime('%Y-%m-%d')
+
     # Pivot tables for bookings, revenue, and refundable rates
-    bookings_pivot = df_agg.pivot_table(
+    bookings_pivot = df_full.pivot_table(
         index="stay_date_str",
         columns="created_date_str",
         values="number_of_bookings",
@@ -261,7 +275,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         aggfunc='sum'
     )
 
-    revenue_pivot = df_agg.pivot_table(
+    revenue_pivot = df_full.pivot_table(
         index="stay_date_str",
         columns="created_date_str",
         values="total_revenue",
@@ -275,7 +289,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
     # Replace NaN values with 0 for the heatmap
     revenue_fig = average_revenue_per_booking.fillna(0)
 
-    refundable_pivot = df_agg.pivot_table(
+    refundable_pivot = df_full.pivot_table(
         index="stay_date_str",
         columns="created_date_str",
         values="refundable_rate1",
@@ -452,22 +466,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         paper_bgcolor='white',
         height=900,  # Adjust height if needed
         xaxis=dict(
-            tickfont=dict(size=18),
-            type='category',
-            showgrid=False,
-            categoryarray=complete_date_range_str,  # Ensure this contains the correct date range
-            gridcolor='LightGray',
-            gridwidth=1          
+            title='Created Date',
+            tickformat='%Y-%m-%d'         
         ),
         yaxis=dict(
-            tickfont=dict(size=18),
-            showticklabels=True,
-            type='category',
-            categoryorder='array',
-            categoryarray=complete_date_range_str,  # Ensure this contains the correct date range
-            showgrid=False,
-            gridcolor='LightGray',
-            gridwidth=1  
+            title='Stay Date',
+            tickformat='%Y-%m-%d'
         ),  # Adjust margins for space, especially if colorbar is below
     )
 
@@ -484,22 +488,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         paper_bgcolor='white',
         height=900,
         xaxis=dict(
-            tickfont=dict(size=18),
-            type='category',
-            showgrid=False,
-            categoryarray=complete_date_range_str,
-            gridcolor='LightGray',
-            gridwidth=1          
+            title='Created Date',
+            tickformat='%Y-%m-%d'  
         ),
         yaxis=dict(
-            tickfont=dict(size=18),
-            showticklabels=True,
-            type='category',
-            categoryorder='array',
-            categoryarray=complete_date_range_str,
-            showgrid=False,
-            gridcolor='LightGray',
-            gridwidth=1  
+            title='Stay Date',
+            tickformat='%Y-%m-%d'
         ),
     )
 
@@ -516,22 +510,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         paper_bgcolor='white',
         height=900,
         xaxis=dict(
-            tickfont=dict(size=18),
-            type='category',
-            showgrid=False,
-            categoryarray=complete_date_range_str,
-            gridcolor='LightGray',
-            gridwidth=1          
+            title='Created Date',
+            tickformat='%Y-%m-%d'        
         ),
         yaxis=dict(
-            tickfont=dict(size=18),
-            showticklabels=True,
-            type='category',
-            categoryorder='array',
-            categoryarray=complete_date_range_str,
-            showgrid=False,
-            gridcolor='LightGray',
-            gridwidth=1  
+            title='Stay Date',
+            tickformat='%Y-%m-%d' 
         ),
         showlegend=False
     )

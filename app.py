@@ -309,7 +309,8 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
             values="non_refundable_rate",
             fill_value=0,
             aggfunc='min'
-        ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values
+        ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0).values,
+        bookings_pivot.values
     ))
     
     bookings_max = bookings_pivot.values.max()
@@ -351,9 +352,10 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         hovertemplate=(
             'Booking Date: %{x}<br>' +
             'Stay Date: %{y}<br>' +
+            'Total Number of Bookings:  %{customdata[5]:.2f}<br>' + 
+            'Total Revenue: %{customdata[1]:.2f}<br>' +
             'ADR: %{z}<br><extra></extra>' +
             'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
-            'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
             'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
             'Non-Refundable Rate: %{customdata[4]:.2f}<br>'   # Correct access to non-refundable rat
         ),
@@ -396,7 +398,8 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         customdata=combined_customdata,
         hovertemplate=(
             'Stay Date: %{x}<br>' +
-            'Booking Date: %{y}<br><extra></extra>' +            
+            'Booking Date: %{y}<br><extra></extra>' +   
+            'Total Number of Bookings:  %{customdata[5]:.2f}<br>' +        
             'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
             'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
             'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate

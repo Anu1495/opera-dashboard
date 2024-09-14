@@ -903,7 +903,40 @@ app.layout = dbc.Container([
             ),
         ], width=2),
     ], style={'marginBottom': '20px'}),
-
+    dbc.Row(
+        dbc.Col(
+            html.Div([
+                dbc.Alert(
+                    [
+                        html.H4("Information", className="alert-heading"),
+                        html.P([
+                            html.Strong("ADR > rate: "), 
+                            "When Avg. Daily Rate is higher than the selling rate"
+                        ], className="mb-1"),
+                        html.P([
+                            html.Strong("Probable Upgrades: "), 
+                            "When the difference between selling rate and opera rate is more than £20, it has a high chance of being an upgrade"
+                        ], className="mb-1"),
+                        html.P([
+                            html.Strong("Discount: "), 
+                            "Considering Genius 10% Discount, if opera rate/.9, it gets closer to the selling rate"
+                        ], className="mb-1"),
+                    ],
+                    color="info",
+                    style={
+                        'position': 'absolute',
+                        'top': '10px',
+                        'right': '10px',
+                        'width': '500px'
+                    }
+                )
+            ]),
+            width=12,
+            style={'textAlign': 'left'}
+        ),
+        style={'marginBottom': '20px'}
+    ),
+    
     dbc.Row([
         dbc.Col([
             dcc.Dropdown(
@@ -1043,13 +1076,14 @@ dcc.Tabs([
                     ],
                     value=[],  # No checkbox selected initially
                     inline=True,
-                    style={'display': 'flex', 'justify-content': 'flex-end', 'gap': '10px'}
+                    style={'display': 'flex', 'justify-content': 'flex-end', 'gap': '20px'}
                 ), 
                 width=12, 
                 style={'textAlign': 'right'}
             ), 
             style={'marginTop': '20px'}
         ),
+        
         
         dbc.Row([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),

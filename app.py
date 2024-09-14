@@ -10,6 +10,7 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
@@ -241,10 +242,10 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
 
     # Calculate the maximum rate between refundable and non-refundable rates
     df_agg['refundable_rate1'] = df_agg[['refundable_rate', 'non_refundable_rate']].max(axis=1)
-
+    
     df_agg['created_date_str'] = df_agg['created_date'].dt.strftime('%Y-%m-%d')
     df_agg['stay_date_str'] = df_agg['stay_date'].dt.strftime('%Y-%m-%d')
-
+    
     # Use the actual range of dates in the dataset
     actual_created_dates = pd.date_range(start=df_agg['created_date'].min(), end=df_agg['created_date'].max())
     actual_stay_dates = pd.date_range(start=df_agg['stay_date'].min(), end=df_agg['stay_date'].max())
@@ -366,54 +367,174 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, colorscale, se
         aggfunc='min'
     ).reindex(index=bookings_pivot.index, columns=bookings_pivot.columns, fill_value=0)
 
-    min_rates = np.minimum(refundable_pivot.values, non_refundable_pivot.values)
-    filled_avg_revenue = average_revenue_per_booking.fillna(0).values
-    filled_min_rates = np.nan_to_num(min_rates)
-
-    # Create the border mask by comparing the filled arrays
-    border_mask = filled_avg_revenue > filled_min_rates
-
-    # Create the base heatmap figure
+    # Create initial revenue heatmap
     revenue_fig = go.Figure(data=go.Heatmap(
-        z=filled_avg_revenue,
-        x=average_revenue_per_booking.columns,
-        y=average_revenue_per_booking.index,
-        customdata=combined_customdata,
-        hovertemplate=(
-            'Booking Date: %{x}<br>' +
-            'Stay Date: %{y}<br>' +
-            'Total Number of Bookings:  %{customdata[5]:.2f}<br>' + 
-            'Total Revenue: %{customdata[1]:.2f}<br>' +
-            'ADR: %{z}<br><extra></extra>' +
-            'Channel Names: %{customdata[0]}<br>' +
-            'Refundable Rate: %{customdata[2]:.2f}<br>' +
-            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
-        ),
-        colorscale=colorscale,
-        colorbar=dict(
-            title="Total Revenue",
-            orientation='h',
-            x=0.5,
-            y=-0.3,
-            len=0.6,
-            thickness=15
-        ),
-        zmin=0,
-        zmax=max_rate_value,
-    ))
-
-    # Check if the checkbox is selected to add the black markers
-    if 'show_markers' in checkbox_values:
-        border_points = np.where(border_mask)
-        revenue_fig.add_trace(go.Scatter(
-            x=average_revenue_per_booking.columns[border_points[1]],
-            y=average_revenue_per_booking.index[border_points[0]],
-            mode='markers',
-            marker=dict(color='black', size=4, symbol='square'),
-            showlegend=False,
-            hoverinfo='skip'
+            z=average_revenue_per_booking.fillna(0).values,
+            x=average_revenue_per_booking.columns,
+            y=average_revenue_per_booking.index,
+            customdata=combined_customdata,
+            hovertemplate=(
+                'Booking Date: %{x}<br>' +
+                'Stay Date: %{y}<br>' +
+                'Total Number of Bookings: %{customdata[5]:.2f}<br>' + 
+                'Total Revenue: %{customdata[1]:.2f}<br>' +
+                'ADR: %{z}<br><extra></extra>' +
+                'Channel Names: %{customdata[0]}<br>' +
+                'Refundable Rate: %{customdata[2]:.2f}<br>' +
+                'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
+            ),
+            colorscale=colorscale,
+            colorbar=dict(
+                title="Total Revenue",
+                orientation='h',
+                x=0.5,
+                y=-0.3,
+                len=0.6,
+                thickness=15
+            ),
+            zmin=0,
+            zmax=max_rate_value,
         ))
-        
+
+        # Conditions for checkboxes
+    if 'show_markers_adr' in checkbox_values:
+            # Condition for ADR > min rate
+            min_rates = np.minimum(refundable_pivot.values, non_refundable_pivot.values)
+            adr_mask = average_revenue_per_booking.fillna(0).values > min_rates
+            revenue_fig = go.Figure(data=go.Heatmap(
+                z=np.where(adr_mask, average_revenue_per_booking.fillna(0).values, np.nan),
+                x=average_revenue_per_booking.columns,
+                y=average_revenue_per_booking.index,
+                customdata=combined_customdata,
+                hovertemplate=(
+                    'Booking Date: %{x}<br>' +
+                    'Stay Date: %{y}<br>' +
+                    'Total Number of Bookings: %{customdata[5]:.2f}<br>' + 
+                    'Total Revenue: %{customdata[1]:.2f}<br>' +
+                    'ADR: %{z}<br><extra></extra>' +
+                    'Channel Names: %{customdata[0]}<br>' +
+                    'Refundable Rate: %{customdata[2]:.2f}<br>' +
+                    'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
+                ),
+                colorscale=colorscale,
+                colorbar=dict(
+                    title="Total Revenue",
+                    orientation='h',
+                    x=0.5,
+                    y=-0.3,
+                    len=0.6,
+                    thickness=15
+                ),
+                zmin=0,
+                zmax=max_rate_value,
+            ))
+
+    if 'upgrades' in checkbox_values:
+        # Condition for rate difference > 20 for FLRA1
+        rate_diff_mask = (df_agg['rate_plan_code'] == 'FLRA1') & \
+                        (np.abs(df_agg['refundable_rate'] - df_agg['exp_rate']) > 20)
+
+        df_agg['rate_diff_flag'] = rate_diff_mask
+
+        # Aggregate the mask
+        rate_diff_aggregated = df_agg.groupby(['stay_date', 'created_date'])['rate_diff_flag'].any().unstack()
+
+        # Print aggregated mask to debug
+        print("Rate Difference Aggregated:\n", rate_diff_aggregated.head())
+
+        # Check if the heatmap data has the correct shape
+        masked_revenue_data = np.where(rate_diff_aggregated.reindex(index=average_revenue_per_booking.index, 
+                                                                    columns=average_revenue_per_booking.columns, 
+                                                                    fill_value=False).values, 
+                                    average_revenue_per_booking.fillna(0).values, 
+                                    np.nan)
+
+        # Print masked revenue data to debug
+        print("Masked Revenue Data:\n", masked_revenue_data)
+        print("Masked Revenue Data Shape:", masked_revenue_data.shape)
+
+        # Create the heatmap figure with the masked values
+        revenue_fig = go.Figure(data=go.Heatmap(
+            z=masked_revenue_data,
+            x=average_revenue_per_booking.columns,
+            y=average_revenue_per_booking.index,
+            customdata=combined_customdata,
+            hovertemplate=(
+                'Booking Date: %{x}<br>' +
+                'Stay Date: %{y}<br>' +
+                'Total Number of Bookings: %{customdata[5]:.2f}<br>' + 
+                'Total Revenue: %{customdata[1]:.2f}<br>' +
+                'ADR: %{z}<br><extra></extra>' +
+                'Channel Names: %{customdata[0]}<br>' +
+                'Refundable Rate: %{customdata[2]:.2f}<br>' +
+                'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
+            ),
+            colorscale=colorscale,
+            colorbar=dict(
+                title="Total Revenue",
+                orientation='h',
+                x=0.5,
+                y=-0.3,
+                len=0.6,
+                thickness=15
+            ),
+            zmin=0,
+            zmax=max_rate_value,
+        ))
+
+    if 'discount' in checkbox_values:
+        # Condition for rate difference > 20 and close expected rate to refundable rate
+        expected_rate_adjusted = df_agg['exp_rate'] / 0.9
+        rate_diff_mask1 = (df_agg['rate_plan_code'] == 'FLRA1') & \
+                        (np.abs(expected_rate_adjusted - df_agg['refundable_rate']) <= 10)
+
+        df_agg['rate_diff_flag1'] = rate_diff_mask1
+
+        # Aggregate the mask
+        rate_diff_aggregated1 = df_agg.groupby(['stay_date', 'created_date'])['rate_diff_flag1'].any().unstack()
+
+        # Print aggregated mask to debug
+        print("Rate Difference Aggregated (discount):\n", rate_diff_aggregated1.head())
+
+        # Check if the heatmap data has the correct shape
+        masked_revenue_data1 = np.where(rate_diff_aggregated1.reindex(index=average_revenue_per_booking.index, 
+                                                                    columns=average_revenue_per_booking.columns, 
+                                                                    fill_value=False).values, 
+                                        average_revenue_per_booking.fillna(0).values, 
+                                        np.nan)
+
+        # Print masked revenue data to debug
+        print("Masked Revenue Data (discount):\n", masked_revenue_data1)
+        print("Masked Revenue Data Shape (discount):", masked_revenue_data1.shape)
+
+        # Create the heatmap figure with the masked values
+        revenue_fig = go.Figure(data=go.Heatmap(
+            z=masked_revenue_data1,
+            x=average_revenue_per_booking.columns,
+            y=average_revenue_per_booking.index,
+            customdata=combined_customdata,
+            hovertemplate=(
+                'Booking Date: %{x}<br>' +
+                'Stay Date: %{y}<br>' +
+                'Total Number of Bookings: %{customdata[5]:.2f}<br>' + 
+                'Total Revenue: %{customdata[1]:.2f}<br>' +
+                'ADR: %{z}<br><extra></extra>' +
+                'Channel Names: %{customdata[0]}<br>' +
+                'Refundable Rate: %{customdata[2]:.2f}<br>' +
+                'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
+            ),
+            colorscale=colorscale,
+            colorbar=dict(
+                title="Total Revenue",
+                orientation='h',
+                x=0.5,
+                y=-0.3,
+                len=0.6,
+                thickness=15
+            ),
+            zmin=0,
+            zmax=max_rate_value,
+        ))
 
     # Initialize arrays for highlighting
     highlight_refundable = np.zeros_like(refundable_data.values)  # For plus signs
@@ -914,10 +1035,15 @@ dcc.Tabs([
         dbc.Row(
                 dbc.Col(
                     dcc.Checklist(
-                    id='adr-checkbox',
-                    options=[{'label': 'ADR > Rate', 'value': 'show_markers'}],
-                    value=[],
-                    inline=True
+                    id='checkbox-heatmap-filters',
+                    options=[
+                        {'label': 'ADR > rate', 'value': 'show_markers_adr'},
+                        {'label': 'Probable Upgrades', 'value': 'upgrades'},
+                        {'label': 'Discount', 'value': 'discount'}
+                    ],
+                    value=[],  # No checkbox selected initially
+                    inline=True,
+                    style={'display': 'flex', 'justify-content': 'flex-end', 'gap': '10px'}
                 ), 
                 width=12, 
                 style={'textAlign': 'right'}
@@ -1089,7 +1215,7 @@ dcc.Tab(
      Input('heatmap3', 'clickData'),
      Input('company-dropdown', 'value'),
      Input('night-dropdown', 'value'),
-     Input('adr-checkbox', 'value')]
+     Input('checkbox-heatmap-filters', 'value')]
 )
 def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights, checkbox_values):
     # Default values

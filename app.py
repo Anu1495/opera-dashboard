@@ -320,7 +320,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             # Process 'discount' checkbox values
             if 'discount' in checkbox_values:
                 if not selected_discount_adjustments:
-                    selected_discount_adjustments = ['0.9', '0.81', '0.85', '0.765', '0.8', '0.72']
+                    selected_discount_adjustments = ['0.9', '.81', '.85', '.765', '.8', '.72']
 
                 rate_diff_mask_dict = {adj: np.zeros(len(df_agg), dtype=bool) for adj in selected_discount_adjustments}
 
@@ -340,12 +340,12 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
 
                 # Create and combine discount masks
                 discount_masks = {
-                    '.9': np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1,
-                    '.81': np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1,
-                    '.85': np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1,
-                    '.765': np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1,
-                    '.8': np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1,
-                    '.72': np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1
+                    '.9': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1),
+                    '.81': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1),
+                    '.85': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1),
+                    '.765':(df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1),
+                    '.8': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1),
+                    '.72': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1)
                 }
                 discount_mask = np.any(list(discount_masks.values()), axis=0)
                 rate_diff_mask = rate_diff_mask & ~discount_mask

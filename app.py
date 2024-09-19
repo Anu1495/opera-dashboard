@@ -10,6 +10,8 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+import webbrowser
+import threading
 
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -448,7 +450,8 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         ),
         zmin=0,
         zmax=500
-    ))    
+    ))
+
 
     booking_fig.update_layout(
         title={
@@ -626,7 +629,7 @@ app.layout = dbc.Container([
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-12-31',
+                end_date='2025-06-30',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -637,7 +640,7 @@ app.layout = dbc.Container([
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
-                end_date='2024-12-31',
+                end_date='2025-06-30',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -1632,4 +1635,6 @@ def update_heatmap(selected_hotel, rate_type, stay_date_start, stay_date_end, cr
     return fig
 
 if __name__ == '__main__':
+    # Run the app using Waitress
+    threading.Thread(target=lambda: webbrowser.open('http://127.0.0.1:8050/')).start()
     serve(app.server, host='0.0.0.0', port=8050)

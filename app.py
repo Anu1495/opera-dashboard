@@ -336,16 +336,16 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             # Process 'upgrades' checkbox values
             if 'upgrades' in checkbox_values:
                 rate_diff_mask = (df_agg['rate_plan_code'] == 'FLRA1') & \
-                                (np.abs(df_agg['refundable_rate'] - df_agg['exp_rate']) > 20)
+                                (np.abs(df_agg['refundable_rate'] - df_agg['exp_rate']) > 29)
 
                 # Create and combine discount masks
                 discount_masks = {
-                    '.9': np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1,
-                    '.81': np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1,
-                    '.85': np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1,
-                    '.765': np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1,
-                    '.8': np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1,
-                    '.72': np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1
+                    '.9': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1),
+                    '.81': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1),
+                    '.85': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1),
+                    '.765':(df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1),
+                    '.8': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1),
+                    '.72': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1)
                 }
                 discount_mask = np.any(list(discount_masks.values()), axis=0)
                 rate_diff_mask = rate_diff_mask & ~discount_mask

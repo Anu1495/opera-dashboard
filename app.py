@@ -10,8 +10,6 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
-import webbrowser
-import threading
 
 # Database connection details
 db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -1635,6 +1633,4 @@ def update_heatmap(selected_hotel, rate_type, stay_date_start, stay_date_end, cr
     return fig
 
 if __name__ == '__main__':
-    # Run the app using Waitress
-    threading.Thread(target=lambda: webbrowser.open('http://127.0.0.1:8050/')).start()
-    serve(app.server, host='0.0.0.0', port=8050)
+    serve(app.server, host='0.0.0.0', port=8000)

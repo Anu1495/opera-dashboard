@@ -37,47 +37,6 @@ SELECT hotel_id, room_name, exp_rate, company_name, "name", rate_plan_code, crea
 FROM public.operadashboard;
 """
 df = pd.read_sql_query(query, engine)
-ratequery = """
-WITH rate_updates AS (
-    SELECT DISTINCT ON (u.hotel_id, date_update::date)
-        u.hotel_id,
-        u.rate_update_id,
-        date_update::date AS report_date
-    FROM rate_update u
-    WHERE u.hotel_id = '6'
-        AND u.date_update::date >= '2024-01-01'
-        AND u.date_update::date < CURRENT_DATE
-    ORDER BY u.hotel_id, date_update::date, date_update DESC
-),
-ota_rooms AS (
-    SELECT DISTINCT
-        o.ota_room_id,
-        COALESCE(rc."name", r."name") AS "name"
-    FROM ota_room o
-    JOIN room r ON r.room_id = o.room_id
-    LEFT JOIN room_category rc ON rc.room_category_id = r.room_category_id
-    WHERE o.hotel_id = '6'
-)
-SELECT
-    u.hotel_id,
-    u.report_date,
-    r.stay_date::date as rate_date,
-    r.refundable,
-    r.adultcount,
-    MIN(r.amount)::numeric(18,2) AS min_rate,
-    o.name,
-    MIN(CASE WHEN r.refundable THEN r.amount END) AS refundable_rate,
-    MIN(CASE WHEN NOT r.refundable THEN r.amount END) AS non_refundable_rate
-FROM rate_new r
-JOIN rate_updates u ON r.rate_update_id = u.rate_update_id
-JOIN ota_rooms o ON o.ota_room_id = r.ota_room_id
-WHERE r.adultcount = 2
-GROUP BY
-    u.hotel_id, u.report_date, r.stay_date, o.name, r.refundable, r.adultcount
-"""
-
-# Fetch the data
-df1 = pd.read_sql_query(ratequery, engine)
 
 
 # Close the connection
@@ -627,7 +586,7 @@ app.layout = dbc.Container([
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
-                end_date='2025-06-30',
+                end_date='2024-12-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -638,7 +597,7 @@ app.layout = dbc.Container([
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
-                end_date='2025-06-30',
+                end_date='2024-12-31',
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
@@ -844,8 +803,7 @@ dcc.Tabs([
         dbc.Row([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),
             dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px', 'marginBottom': '10px'}), width=6),  # Set fixed height
-            dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6),
-            dbc.Col(dcc.Graph(id='heatmap-graph', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
+            dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6)
     
         ], style={'marginbotto': '40px'}),  # Set fixed height),
 
@@ -1497,140 +1455,6 @@ def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels,
     )
 
     return new_line_chart_fig
-@app.callback(
-    Output('heatmap-graph', 'figure'),
-    [Input('hotel-dropdown', 'value'),
-     Input('rate-type-dropdown', 'value'),
-     Input('stay-date-picker', 'start_date'),
-     Input('stay-date-picker', 'end_date'),
-     Input('created-date-picker', 'start_date'),
-     Input('created-date-picker', 'end_date')]
-)
-def update_heatmap(selected_hotel, rate_type, stay_date_start, stay_date_end, created_date_start, created_date_end):
-    # Convert date strings to datetime.date objects if they are not None
-    stay_date_start = pd.to_datetime(stay_date_start) if stay_date_start else None
-    stay_date_end = pd.to_datetime(stay_date_end) if stay_date_end else None
-    created_date_start = pd.to_datetime(created_date_start) if created_date_start else None
-    created_date_end = pd.to_datetime(created_date_end) if created_date_end else None
-
-    # Adjust the SQL query to include date range filters
-    ratequery = """
-    WITH rate_updates AS (
-        SELECT DISTINCT ON (u.hotel_id, date_update::date)
-            u.hotel_id,
-            u.rate_update_id,
-            date_update::date AS report_date
-        FROM rate_update u
-        WHERE u.hotel_id = %s
-            AND u.date_update::date BETWEEN %s AND %s
-        ORDER BY u.hotel_id, date_update::date, date_update DESC
-    ),
-    ota_rooms AS (
-        SELECT DISTINCT
-            o.ota_room_id,
-            COALESCE(rc."name", r."name") AS "name"
-        FROM ota_room o
-        JOIN room r ON r.room_id = o.room_id
-        LEFT JOIN room_category rc ON rc.room_category_id = r.room_category_id
-        WHERE o.hotel_id = %s
-    )
-    SELECT
-        u.hotel_id,
-        u.report_date,
-        r.stay_date::date AS rate_date,
-        r.refundable,
-        r.adultcount,
-        MIN(r.amount)::numeric(18,2) AS min_rate,
-        o.name,
-        MIN(CASE WHEN r.refundable THEN r.amount END) AS refundable_rate,
-        MIN(CASE WHEN NOT r.refundable THEN r.amount END) AS non_refundable_rate
-    FROM rate_new r
-    JOIN rate_updates u ON r.rate_update_id = u.rate_update_id
-    JOIN ota_rooms o ON o.ota_room_id = r.ota_room_id
-    WHERE r.adultcount = 2
-    AND r.stay_date::date BETWEEN %s AND %s
-    GROUP BY
-        u.hotel_id, u.report_date, r.stay_date, o.name, r.refundable, r.adultcount
-    """
-
-    # Fetch data based on selected hotel and date filters
-    df1 = pd.read_sql_query(ratequery, engine, params=(selected_hotel, created_date_start, created_date_end, selected_hotel, stay_date_start, stay_date_end))
-
-    # Ensure date columns are in datetime format
-    df1['report_date'] = pd.to_datetime(df1['report_date'])
-    df1['rate_date'] = pd.to_datetime(df1['rate_date'])
-
-    # Compute the selected rate type
-    if rate_type == 'refundable_rate':
-        df1['mean_rate'] = df1['refundable_rate']
-    else:
-        df1['mean_rate'] = df1['non_refundable_rate']
-
-    # Determine the minimum and maximum dates in the dataset
-    min_report_date = df1['report_date'].min()
-    max_report_date = df1['report_date'].max()
-    min_rate_date = df1['rate_date'].min()
-    max_rate_date = df1['rate_date'].max()
-
-    # Generate complete date ranges based on min and max dates
-    complete_report_dates = pd.date_range(start=min_report_date, end=max_report_date, freq='D')
-    complete_rate_dates = pd.date_range(start=min_rate_date, end=max_rate_date, freq='D')
-
-    # Create pivot table for the selected rate type with all date ranges included
-    pivot_table = df1.pivot_table(
-        index='rate_date',
-        columns='report_date',
-        values='mean_rate',
-        fill_value=0
-    ).reindex(index=complete_rate_dates, columns=complete_report_dates, fill_value=0)
-
-    # Convert the complete date ranges to strings for consistent axis formatting
-    complete_report_dates_str = complete_report_dates.strftime('%Y-%m-%d')
-    complete_rate_dates_str = complete_rate_dates.strftime('%Y-%m-%d')
-
-    # Create the heatmap
-    if pivot_table.empty:
-        fig = go.Figure()
-        fig.update_layout(
-            title='No Data Available',
-            xaxis_title='Report Date',
-            yaxis_title='Stay Date'
-        )
-    else:
-        fig = go.Figure(data=go.Heatmap(
-            z=pivot_table.values,
-            x=complete_report_dates_str,
-            y=complete_rate_dates_str,
-            colorscale=custom_colorscale,
-            colorbar=dict(title='Rate'),
-            zmin=0,
-            zmax=pivot_table.values.max()
-        ))
-
-        fig.update_layout(
-            title=f'{rate_type.replace("_", " ").title()} Heatmap',
-            xaxis_title='Report Date',
-            yaxis_title='Stay Date',
-            xaxis=dict(
-                tickfont=dict(size=18),
-                showgrid=False,
-                gridcolor='LightGray',
-                gridwidth=1
-            ),
-            yaxis=dict(
-                tickfont=dict(size=18),
-                showticklabels=True,
-                showgrid=False,
-                gridcolor='LightGray',
-                gridwidth=1
-            ),
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            height=900,
-            showlegend=False
-        )
-
-    return fig
 
 if __name__ == '__main__':
-    serve(app.server, host='0.0.0.0', port=8000)
+    serve(app.server, host='0.0.0.0', port=8050)

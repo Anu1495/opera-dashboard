@@ -317,9 +317,10 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
                 zmax=500,
             ))
         else:
-           if 'discount' in checkbox_values:
+            # Process 'discount' checkbox values
+            if 'discount' in checkbox_values:
                 if not selected_discount_adjustments:
-                    selected_discount_adjustments = ['0.9', '.81', '.85', '.765', '.8', '.72']
+                    selected_discount_adjustments = ['0.9', '0.81', '0.85', '0.765', '0.8', '0.72']
 
                 rate_diff_mask_dict = {adj: np.zeros(len(df_agg), dtype=bool) for adj in selected_discount_adjustments}
 
@@ -335,16 +336,16 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             # Process 'upgrades' checkbox values
             if 'upgrades' in checkbox_values:
                 rate_diff_mask = (df_agg['rate_plan_code'] == 'FLRA1') & \
-                                (np.abs(df_agg['refundable_rate'] - df_agg['exp_rate']) > 29)
+                                (np.abs(df_agg['refundable_rate'] - df_agg['exp_rate']) > 20)
 
                 # Create and combine discount masks
                 discount_masks = {
-                    '.9': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1),
-                    '.81': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1),
-                    '.85': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1),
-                    '.765':(df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1),
-                    '.8': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1),
-                    '.72': (df_agg['rate_plan_code'] == 'FLRA1') & (np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1)
+                    '.9': np.abs(df_agg['exp_rate'] / .9 - df_agg['refundable_rate1']) <= 1,
+                    '.81': np.abs(df_agg['exp_rate'] / .81 - df_agg['refundable_rate1']) <= 1,
+                    '.85': np.abs(df_agg['exp_rate'] / .85 - df_agg['refundable_rate1']) <= 1,
+                    '.765': np.abs(df_agg['exp_rate'] / .765 - df_agg['refundable_rate1']) <= 1,
+                    '.8': np.abs(df_agg['exp_rate'] / .8 - df_agg['refundable_rate1']) <= 1,
+                    '.72': np.abs(df_agg['exp_rate'] / .72 - df_agg['refundable_rate1']) <= 1
                 }
                 discount_mask = np.any(list(discount_masks.values()), axis=0)
                 rate_diff_mask = rate_diff_mask & ~discount_mask
@@ -378,10 +379,11 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
                 customdata=combined_customdata,
                 hovertemplate=(
                     'Booking Date: %{x}<br>' +
-                    'Stay Date: %{y}<br><extra></extra>' +
+                    'Stay Date: %{y}<br>' +
                     'Total Number of Bookings: %{customdata[5]:.2f}<br>' +
                     'Total Revenue: %{customdata[1]:.2f}<br>' +
                     'ADR: %{z}<br>' +
+                    'Channel Names: %{customdata[0]}<br>' +
                     'Refundable Rate: %{customdata[2]:.2f}<br>' +
                     'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
                 ),
@@ -450,6 +452,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         zmin=0,
         zmax=500
     ))
+
 
     booking_fig.update_layout(
         title={

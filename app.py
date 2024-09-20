@@ -33,44 +33,8 @@ hotel_options = [{'label': row['name'], 'value': row['hotel_id']} for _, row in 
 
 # Query for initial data
 query = """
-SELECT
-    dt."date" AS stay_date,
-    h."name",
-    b.created_date::date AS created_date,
-    h.hotel_id,
-    b.booking_channel_name,
-    b.booking_status, 
-    r."name" AS room_name,
-    b.rate_plan_code,  -- Include room_name in the query
-    COUNT(b.booking_reference) AS number_of_bookings,
-    sum(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
-FROM
-    booking b
-JOIN
-    hotel h ON b.hotel_id = h.hotel_id
-JOIN 
-        room r ON b.room_id=r.room_id
-JOIN 
-    caldate dt ON b.check_in <= dt."date" 
-    AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
-LEFT OUTER JOIN 
-    booking_rate br ON b.booking_id=br.booking_rate_id
-WHERE
-    dt."date" >= '2024-01-01' AND b.created_date >= '2024-01-01' 
-    AND b.hotel_id IN (5, 3, 6, 7, 4, 62)
-GROUP BY
-    dt."date",
-    b.created_date::date,
-    h.name,
-    h.hotel_id,
-    b.rate_plan_code,
-    b.booking_status,
-    b.booking_channel_name,
-    r."name" 
-    
-ORDER BY
-    b.created_date::date,
-    dt."date";
+SELECT hotel_id, room_name, exp_rate, company_name, "name", rate_plan_code, created_date, booking_status, booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
+FROM public.operadashboard;
 """
 
 # Fetch initial data
@@ -248,119 +212,26 @@ def create_heatmaps(df, booking_title, revenue_title, colorscale):
 
 
 
-def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status):
-    channel_filter = f"AND b.booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
-    room_filter = f"AND r.name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
-    rate_plan_filter = f"AND b.rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
-    book_status_filter = f"AND b.booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
+def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_company, selected_nights):
+    channel_filter = f"AND booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
+    room_filter = f"AND name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
+    rate_plan_filter = f"AND rate_plan_code IN ({', '.join(f'\'{rate}\'' for rate in selected_rate_plan)})" if selected_rate_plan else ""
+    book_status_filter = f"AND booking_status IN ({', '.join(f'\'{book}\'' for book in selected_booking_status)})" if selected_booking_status else ""
+    company_filter = f"AND company_name IN ({', '.join(f'\'{company}\'' for company in selected_company)})" if selected_company else ""
+    nights_filter = f"AND nights IN ({', '.join(f'\'{night}\'' for night in selected_nights)})" if selected_nights else ""
     detail_query = f"""
-    WITH BookingData AS (
-        SELECT
-            b.booking_id,
-            b.hotel_id,
-            b.room_id,
-            b.created_date::date AS created_date,
-            b.check_in,
-            b.check_out, b.cancel_date::date AS cancel_date,
-            b.booking_reference, EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
-            b.booking_channel_name,
-            b.booking_status,
-            b.rate_plan_code,
-            b.nights,
-            ROUND(COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)),2) AS total_revenue_x,
-            h."name" AS hotel_name,
-            r."name" AS room_name, r.code as rate_code,
-            dt."date" AS stay_date
-        FROM
-            booking b
-        JOIN
-            hotel h ON b.hotel_id = h.hotel_id
-        JOIN
-            room r ON b.room_id = r.room_id
-        JOIN
-            caldate dt ON b.check_in <= dt."date"
-            AND (b.check_out > dt."date" OR (b.check_in = b.check_out AND dt."date" = b.check_in))
-        LEFT JOIN
-            booking_rate br ON b.booking_id = br.booking_rate_id
-        WHERE
-            b.created_date = '{created_date}'
-            AND dt."date" = '{stay_date}'
-            AND b.hotel_id = {selected_hotel}
-            {channel_filter}
-            {room_filter}
-            {rate_plan_filter}
-            {book_status_filter}
-    ),
-    RateData AS (
-        SELECT
-            rh.stay_date,
-            MIN(rh.amount) AS min_rate,
-            ru.hotel_id,
-            or2.ota_room_id,
-            or2.room_id
-        FROM
-            rate_new rh
-        JOIN
-            rate_update ru ON ru.rate_update_id = rh.rate_update_id
-        JOIN
-            ota_room or2 ON or2.ota_room_id = rh.ota_room_id
-        WHERE
-            rh.stay_date = '{stay_date}'
-            AND ru.hotel_id = {selected_hotel}
-        GROUP BY
-            rh.stay_date, ru.hotel_id, or2.ota_room_id, or2.room_id
-    )
-    SELECT
-        bd.stay_date,
-        COALESCE(
-            rd.min_rate,
-            (
-                SELECT MIN(rh.amount)
-                FROM rate_new rh
-                JOIN rate_update ru ON ru.rate_update_id = rh.rate_update_id
-                WHERE ru.hotel_id = bd.hotel_id
-                  AND rh.stay_date = bd.stay_date
-                  AND rh.ota_room_id IS NULL
-            )
-        ) AS min_rate,
-        rd.ota_room_id, bd.rate_code, bd.date_difference,
-        bd.hotel_name,
-        bd.total_revenue_x,
-        bd.created_date,
-        bd.hotel_id, bd.cancel_date,
-        bd.check_in,
-        bd.check_out,
-        bd.booking_reference,
-        bd.booking_channel_name,
-        bd.booking_status,
-        bd.room_name,
-        bd.rate_plan_code,
-        COUNT(bd.booking_reference) AS number_of_bookings,
-        SUM(bd.total_revenue_x) AS total_revenue
-    FROM
-        BookingData bd
-    LEFT JOIN
-        RateData rd ON bd.hotel_id = rd.hotel_id
-        AND bd.stay_date = rd.stay_date
-        AND bd.room_id = rd.room_id
-    GROUP BY
-        bd.stay_date, bd.cancel_date,
-        rd.min_rate,
-        rd.ota_room_id, bd.rate_code,
-        bd.hotel_name,
-        bd.total_revenue_x,
-        bd.created_date,
-        bd.hotel_id,
-        bd.check_in,
-        bd.check_out,
-        bd.booking_reference, bd.date_difference,
-        bd.booking_channel_name,
-        bd.booking_status,
-        bd.room_name,
-        bd.rate_plan_code
-    ORDER BY
-        bd.created_date,
-        bd.stay_date
+    SELECT hotel_id, room_name, exp_rate, company_name, "name", rate_plan_code, created_date, booking_status, booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
+    FROM public.operadashboard
+    WHERE created_date = '{created_date}'
+            AND stay_date" = '{stay_date}'
+            AND hotel_id = {selected_hotel}
+                {channel_filter}
+                {room_filter}
+                {rate_plan_filter}
+                {book_status_filter}
+                {company_filter}
+                {nights_filter}; 
+    
     """
     
     return pd.read_sql_query(detail_query, engine)

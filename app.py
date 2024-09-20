@@ -320,7 +320,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             # Process 'discount' checkbox values
             if 'discount' in checkbox_values:
                 if not selected_discount_adjustments:
-                    selected_discount_adjustments = ['0.9', '0.81', '0.85', '0.765', '0.8', '0.72']
+                    selected_discount_adjustments = ['.9', '.81', '.85', '.765', '.8', '.72']
 
                 rate_diff_mask_dict = {adj: np.zeros(len(df_agg), dtype=bool) for adj in selected_discount_adjustments}
 

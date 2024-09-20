@@ -403,88 +403,55 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             ))
 
 
-    # Initialize arrays for highlighting
-    highlight_refundable = np.zeros_like(refundable_data.values)  # For plus signs
-    highlight_non_refundable = np.zeros_like(refundable_data.values)  # For plus signs
+    filtered_data = refundable_data.copy()
 
-    for _, row in df_agg.iterrows():
-        stay_date = row['stay_date_str']
-        booking_date = row['created_date_str']     
-    # Ensure both stay_date and booking_date are in the pivot table's index and columns
-        if row['rate_plan_code'] == 'FLRA1':
-                if row['refundable_rate'] == row['exp_rate']:
-                    highlight_refundable[refundable_data.index.get_loc(stay_date), refundable_data.columns.get_loc(booking_date)] = 1
-                if row['non_refundable_rate'] == row['exp_rate']:
-                    highlight_non_refundable[refundable_data.index.get_loc(stay_date), refundable_data.columns.get_loc(booking_date)] = 1
+    # Check if the checkbox for matching rates is selected
+    if 'matched_rates' in checkbox_values:
+        # Initialize the data for showing only matching rates (with NaN for non-matching data)
+        filtered_data = np.full_like(refundable_data.values, np.nan)
 
+        for _, row in df_agg.iterrows():
+            stay_date = row['stay_date_str']
+            booking_date = row['created_date_str']
 
-    # Create rate heatmap with borders for highlight
+            # Ensure both stay_date and booking_date are in the pivot table's index and columns
+            if row['rate_plan_code'] == 'FLRA1':
+                # Only show matching refundable rates
+                if row['refundable_rate1'] == row['exp_rate']:
+                    filtered_data[refundable_data.index.get_loc(stay_date), refundable_data.columns.get_loc(booking_date)] = row['refundable_rate1']
+
+    # Create the heatmap figure
     rate_fig = go.Figure()
 
-    # Base heatmap
+    # Base or filtered heatmap
     rate_fig.add_trace(go.Heatmap(
-        z=refundable_data.values,
+        z=filtered_data,  # This will either be the full data or filtered for matching rates
         x=refundable_data.columns,
         y=refundable_data.index,
         customdata=combined_customdata,
         hovertemplate=(
             'Stay Date: %{x}<br>' +
             'Booking Date: %{y}<br><extra></extra>' +   
-            'Total Number of Bookings:  %{customdata[5]:.2f}<br>' +        
-            'Channel Names: %{customdata[0]}<br>' + 
-            'ADR: %{customdata[6]:.2f}<br>' + # Correct access to channel names
-            'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
-            'Refundable Rate: %{customdata[2]:.2f}<br>' +  # Correct access to min refundable rate
-            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'  # Correct access to non-refundable rate
+            'Total Number of Bookings: %{customdata[5]:.2f}<br>' +
+            'ADR: %{customdata[6]:.2f}<br>' +  
+            'Total Revenue: %{customdata[1]:.2f}<br>' +
+            'Refundable Rate: %{customdata[2]:.2f}<br>' +
+            'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
         ),
         colorscale=custom_colorscale,
         colorbar=dict(
-        title="Rates",
-        tickvals=[0, 100, 200, 300, 400, 500],  # Define tick values for rate heatmap
-        ticktext=['0', '100', '200', '300', '400', '500'],
-        orientation='h',
-        x=0.5,
-        y=-0.2,
-        len=0.6,
-        thickness=15
-    ),
-    zmin=0,
-    zmax=500  # or your maximum rate value
-))
-
-# Initialize the text array for highlights
-    highlight_text = np.empty_like(refundable_data.values, dtype=str)
-
-    # Fill in plus and minus signs where there are highlights
-    highlight_text[highlight_refundable == 1] = 'x'
-    highlight_text[highlight_non_refundable == 1] = '0'
-
-    for text, color, highlight_array in [('x', 'lightgreen', highlight_refundable), ('x', 'yellow', highlight_non_refundable)]:
-        rate_fig.add_trace(go.Heatmap(
-            z=refundable_data.values,  # Dummy z data
-            x=bookings_pivot.columns,
-            y=bookings_pivot.index,
-            text=np.where(highlight_array == 1, text, ''),  # Apply plus or minus signs
-            texttemplate='%{text}',
-            colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
-            showscale=False,
-            hoverinfo='skip',
-            textfont=dict(size=30, color=color, family='Arial Black')  # Color for the signs
-        ))
-
-
-    for text, color, highlight_array in [('x', 'green', highlight_refundable), ('x', 'red', highlight_non_refundable)]:
-        rate_fig.add_trace(go.Heatmap(
-            z=refundable_data.values,  # Dummy z data
-            x=bookings_pivot.columns,
-            y=bookings_pivot.index,
-            text=np.where(highlight_array == 1, text, ''),  # Apply plus or minus signs
-            texttemplate='%{text}',
-            colorscale=[[0, 'rgba(0, 0, 0, 0)'], [1, 'rgba(0, 0, 0, 0)']],  # Fully transparent heatmap
-            showscale=False,
-            hoverinfo='skip',
-            textfont=dict(size=20, color=color, family='Arial')  # Color for the signs
-        ))
+            title="Rates",
+            tickvals=[0, 100, 200, 300, 400, 500],
+            ticktext=['0', '100', '200', '300', '400', '500'],
+            orientation='h',
+            x=0.5,
+            y=-0.2,
+            len=0.6,
+            thickness=15
+        ),
+        zmin=0,
+        zmax=500
+    ))
 
 
     booking_fig.update_layout(

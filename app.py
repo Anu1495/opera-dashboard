@@ -725,4 +725,4 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     return booking_heatmap, revenue_heatmap, booking_details_data, bar_chart_fig, channel_options, additional_data, room_options, rate_options, book_options
 
 if __name__ == '__main__':
-        serve(server, host='0.0.0.0', port=8000)
+        serve(server, host='0.0.0.0', port=8050)

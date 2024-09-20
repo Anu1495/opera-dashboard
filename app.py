@@ -1457,4 +1457,4 @@ def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels,
     return new_line_chart_fig
 
 if __name__ == '__main__':
-    serve(app.server, host='0.0.0.0', port=8050)
+    serve(app.server, host='0.0.0.0', port=8000)

@@ -12,7 +12,7 @@ import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
 
 # Database connection details
-db_host = 'hotel-cloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
+db_host = 'hotelcloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
 db_port = '5432'
 db_name = 'hotelcloud'
 db_user = 'hotelcloudadmin'
@@ -33,8 +33,8 @@ hotel_options = [{'label': row['name'], 'value': row['hotel_id']} for _, row in 
 
 # Query for initial data
 query = """
-SELECT hotel_id, room_name, exp_rate, company_name, "name", rate_plan_code, created_date, booking_status, booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
-FROM public.operadashboard;
+SELECT hotel_id, room_name, exp_rate, rate_plan_code, first_name, last_name, company_name, created_date, booking_status, "name", booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
+FROM public.operadashboard1;
 """
 df = pd.read_sql_query(query, engine)
 ratequery = """
@@ -533,111 +533,17 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     company_filter = f"AND company_name IN ({', '.join(f'\'{company}\'' for company in selected_company)})" if selected_company else ""
     nights_filter = f"AND nights IN ({', '.join(f'\'{night}\'' for night in selected_nights)})" if selected_nights else ""
     detail_query = f"""
-    WITH rate_updates AS (
-        SELECT DISTINCT ON (u.hotel_id, date_update::date) 
-            u.hotel_id, 
-            u.rate_update_id, 
-            date_update::date AS report_date
-        FROM rate_update u
-        WHERE u.hotel_id = 6 
-            AND u.date_update::date = '{created_date}' 
-            AND u.date_update::date < CURRENT_DATE
-        ORDER BY u.hotel_id, date_update::date, date_update DESC
-    ),
-    ota_rooms AS (
-        SELECT DISTINCT 
-            o.ota_room_id, 
-            COALESCE(rc."name", r."name") AS "name", 
-            o.room_id, 
-            r."name" AS original
-        FROM ota_room o
-        JOIN room r ON r.room_id = o.room_id
-        JOIN booking b ON r.room_id = b.room_id 
-        LEFT JOIN room_category rc ON rc.room_category_id = r.room_category_id
-        WHERE o.hotel_id = 6
-    ),
-    booking AS (
-        SELECT
-            b.booking_id, ROUND(COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)) * 1.2) AS exp_rate, 
-            b.hotel_id,
-            b.room_id,
-            b.created_date::date AS created_date,
-            b.check_in,
-            b.check_out, 
-            b.cancel_date::date AS cancel_date,
-            b.booking_reference, 
-            EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
-            b.booking_channel_name,
-            b.booking_status, b.company_name,
-            b.adults,
-            b.rate_plan_code,
-            b.nights,
-            ROUND(COALESCE(br.total_revenue, b.total_revenue / NULLIF(b.nights, 0)), 2) AS total_revenue_x,
-            h."name" AS hotel_name,
-            r."name" AS room_name, 
-            r.code AS room_code,
-            dt."date" AS stay_date,
-            p.first_name,
-            p.last_name
-        FROM booking b
-        JOIN hotel h ON b.hotel_id = h.hotel_id
-        JOIN room r ON b.room_id = r.room_id
-        JOIN profile p ON p.profile_id = b.profile_id
-        JOIN caldate dt ON b.check_in <= dt."date"
-            AND (b.check_out > dt."date" OR (b.check_in = b.check_out AND dt."date" = b.check_in))
-        LEFT JOIN booking_rate br ON b.booking_id = br.booking_rate_id
-        WHERE b.created_date = '{created_date}'
-            AND dt."date" = '{stay_date}'
-            AND b.hotel_id = {selected_hotel}
+    SELECT hotel_id, room_name, exp_rate, rate_plan_code, first_name, last_name, company_name, created_date, booking_status, "name", booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
+    FROM public.operadashboard1
+    WHERE created_date = '{created_date}'
+            AND stay_date = '{stay_date}'
+            AND hotel_id = {selected_hotel}
                 {channel_filter}
                 {room_filter}
                 {rate_plan_filter}
                 {book_status_filter}
                 {company_filter}
-                {nights_filter}
-    )
-    SELECT 
-        u.hotel_id, b.room_name, b.room_code, b.company_name,
-        b.rate_plan_code, b.booking_status,
-        u.report_date, b.created_date,
-        b.booking_channel_name,
-        r.stay_date, b.date_difference, 
-        b.stay_date, 
-        b.total_revenue_x, b.exp_rate,
-        r.adultcount, 
-        MIN(CASE WHEN r.refundable THEN r.amount END) AS refundable_rate,
-        MIN(CASE WHEN NOT r.refundable THEN r.amount END) AS non_refundable_rate,
-        o.original, 
-        b.cancel_date, 
-        o.name, 
-        b.booking_reference, 
-        b.check_in, b.booking_id,
-        b.check_out 
-    FROM rate_new r
-    JOIN rate_updates u ON r.rate_update_id = u.rate_update_id
-    JOIN ota_rooms o ON o.ota_room_id = r.ota_room_id
-    JOIN booking b ON b.room_id = o.room_id AND b.created_date = u.report_date
-    JOIN caldate dt ON b.check_in <= dt."date"
-        AND (b.check_out > dt."date" OR (b.check_in = b.check_out AND dt."date" = b.check_in)) 
-        AND dt."date" = r.stay_date
-    WHERE dt.date = r.stay_date and r.stay_date = '{stay_date}'
-        AND b.adults = r.adultcount
-    GROUP BY 
-        u.hotel_id, b.room_name, b.room_code, b.booking_id,
-        u.report_date, b.booking_status,
-        b.rate_plan_code, b.created_date,
-        r.stay_date, 
-        b.adults, b.company_name,
-        o.name, 
-        b.booking_channel_name, b.exp_rate,
-        b.total_revenue_x,
-        r.adultcount, b.date_difference,
-        b.stay_date, 
-        b.booking_reference, 
-        b.check_in, 
-        b.check_out, 
-        b.cancel_date, 
-        o.original;
+                {nights_filter};
     """
     
     return pd.read_sql_query(detail_query, engine)

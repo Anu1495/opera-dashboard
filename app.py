@@ -10,6 +10,9 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
+import webbrowser
+import threading
+from flask_caching import Cache
 
 # Database connection details
 db_host = 'hotelcloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -47,6 +50,9 @@ server = Flask(__name__)
 # Create the Dash app
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+
+cache = Cache(app.server, config={'CACHE_TYPE': 'simple', 'CACHE_DEFAULT_TIMEOUT': 300})
+
 # Create a custom color scale to enhance color differentiation
 custom_colorscale = [
     [0, 'white'],
@@ -57,6 +63,7 @@ custom_colorscale = [
     [1, 'brown']
 ]
 
+@cache.memoize()
 def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels, checkbox_values, selected_discount_adjustments):
     # Fill missing values and convert date columns to datetime format
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
@@ -482,7 +489,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
 
     return booking_fig, revenue_fig, rate_fig
 
-
+@cache.memoize()
 def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_company, selected_nights):
     channel_filter = f"AND booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
@@ -505,7 +512,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     """
     
     return pd.read_sql_query(detail_query, engine)
-
+@cache.memoize()
 # Define the bar chart for booking channels
 def fetch_data_with_sql_query(selected_hotel, stay_date):
     # Define the SQL query using parameterized placeholders
@@ -968,6 +975,8 @@ dcc.Tab(
      Input('checkbox-heatmap-filters', 'value'),
      Input('sub-checkbox-discount-filters', 'value')]
 )
+
+@cache.memoize()
 def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights, checkbox_values, selected_discount_adjustments):
     # Default values
     booking_heatmap = go.Figure()
@@ -1366,6 +1375,8 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
      Input('channel-dropdown', 'value'),
      Input('rate-dropdown', 'value'),]  # Add rate dropdown input
 )
+
+@cache.memoize()
 def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels, selected_rate_plan):
     # Check if stay date and hotel are selected
     if not selected_stay_date or not selected_hotel:
@@ -1457,6 +1468,7 @@ def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels,
 
     return new_line_chart_fig
 
+@cache.memoize()
 def query_database(hotel_id):
     # SQL query to get the data for the selected hotel ID
     query = """
@@ -1475,6 +1487,8 @@ def query_database(hotel_id):
     Output('heatmap', 'figure'),
     [Input('hotel-dropdown', 'value')]
 )
+
+@cache.memoize()
 def update_heatmap(hotel_id):
     try:
         # Query the database (cached for better performance)
@@ -1525,6 +1539,6 @@ def update_heatmap(hotel_id):
     except Exception as e:
         # Return an empty figure or some error message
         return go.Figure()
-
+    
 if __name__ == '__main__':
     serve(app.server, host='0.0.0.0', port=8050)

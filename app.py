@@ -4,14 +4,12 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 import numpy as np
-import plotly.express as px
 from datetime import datetime
 from sqlalchemy import create_engine, text
 from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
-from flask_caching import Cache
 
 # Database connection details
 db_host = 'hotelcloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -49,9 +47,6 @@ server = Flask(__name__)
 # Create the Dash app
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-
-cache = Cache(app.server, config={'CACHE_TYPE': 'simple', 'CACHE_DEFAULT_TIMEOUT': 300})
-
 # Create a custom color scale to enhance color differentiation
 custom_colorscale = [
     [0, 'white'],
@@ -61,7 +56,7 @@ custom_colorscale = [
     [0.8, 'red'],
     [1, 'brown']
 ]
-@cache.memoize()
+
 def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels, checkbox_values, selected_discount_adjustments):
     # Fill missing values and convert date columns to datetime format
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
@@ -178,7 +173,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         customdata=combined_customdata,
         hovertemplate=(
             'Booking Date: %{x}<br>' +
-            'Stay Date: %{y}<br><extra></extra>' +
+            'Stay Date: %{y}<br>' +
             'Total Number of Bookings: %{z}<br>' +
             'Channel Names: %{customdata[0]}<br>' +  # Correct access to channel names
             'Total Revenue: %{customdata[1]:.2f}<br>' +  # Correct access to total revenue
@@ -217,10 +212,11 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             customdata=combined_customdata,
             hovertemplate=(
                 'Booking Date: %{x}<br>' +
-                'Stay Date: %{y}<br><extra></extra>' +
+                'Stay Date: %{y}<br>' +
                 'Total Number of Bookings: %{customdata[5]:.2f}<br>' +
                 'Total Revenue: %{customdata[1]:.2f}<br>' +
-                'ADR: %{z}<br>' +
+                'ADR: %{z}<br><extra></extra>' +
+                'Channel Names: %{customdata[0]}<br>' +
                 'Refundable Rate: %{customdata[2]:.2f}<br>' +
                 'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
             ),
@@ -256,10 +252,11 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
                 customdata=combined_customdata,
                 hovertemplate=(
                     'Booking Date: %{x}<br>' +
-                    'Stay Date: %{y}<br><extra></extra>' +
+                    'Stay Date: %{y}<br>' +
                     'Total Number of Bookings: %{customdata[5]:.2f}<br>' +
                     'Total Revenue: %{customdata[1]:.2f}<br>' +
-                    'ADR: %{z}<br>' +
+                    'ADR: %{z}<br><extra></extra>' +
+                    'Channel Names: %{customdata[0]}<br>' +
                     'Refundable Rate: %{customdata[2]:.2f}<br>' +
                     'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
                 ),
@@ -281,7 +278,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
             # Process 'discount' checkbox values
             if 'discount' in checkbox_values:
                 if not selected_discount_adjustments:
-                    selected_discount_adjustments = ['0.9', '.81', '.85', '.765', '.8', '.72']
+                    selected_discount_adjustments = ['.9', '.81', '.85', '.765', '.8', '.72']
 
                 rate_diff_mask_dict = {adj: np.zeros(len(df_agg), dtype=bool) for adj in selected_discount_adjustments}
 
@@ -340,10 +337,11 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
                 customdata=combined_customdata,
                 hovertemplate=(
                     'Booking Date: %{x}<br>' +
-                    'Stay Date: %{y}<br><extra></extra>' +
+                    'Stay Date: %{y}<br>' +
                     'Total Number of Bookings: %{customdata[5]:.2f}<br>' +
                     'Total Revenue: %{customdata[1]:.2f}<br>' +
                     'ADR: %{z}<br>' +
+                    'Channel Names: %{customdata[0]}<br>' +
                     'Refundable Rate: %{customdata[2]:.2f}<br>' +
                     'Non-Refundable Rate: %{customdata[4]:.2f}<br>'
                 ),
@@ -503,8 +501,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
                 {rate_plan_filter}
                 {book_status_filter}
                 {company_filter}
-                {nights_filter}; 
-    
+                {nights_filter};
     """
     
     return pd.read_sql_query(detail_query, engine)
@@ -586,7 +583,7 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-            html.Div("Stay Date:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '14px', 'fontFamily': 'Arial'}),
+            html.Div("Stay Date:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '20px', 'fontFamily': 'Arial'}),
             dcc.DatePickerRange(
                 id='stay-date-picker',
                 start_date='2024-01-01',
@@ -594,10 +591,10 @@ app.layout = dbc.Container([
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
-        ], width=3),
+        ], width=2),
 
         dbc.Col([
-            html.Div("Booking Date:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '14px', 'fontFamily': 'Arial'}),
+            html.Div("Booking Date:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '20px', 'fontFamily': 'Arial'}),
             dcc.DatePickerRange(
                 id='created-date-picker',
                 start_date='2024-01-01',
@@ -605,7 +602,7 @@ app.layout = dbc.Container([
                 display_format='YYYY-MM-DD',  # Format for displaying date
                 style={'width': '100%', 'padding': '10px'}
             ),
-        ], width=3),
+        ], width=2),
     ], style={'marginBottom': '20px'}),
     dbc.Row(
         dbc.Col(
@@ -642,7 +639,7 @@ app.layout = dbc.Container([
             dcc.Dropdown(
                 id='hotel-dropdown',
                 options=hotel_options,
-                value=6,  # Default value
+                value=hotel_options[0]['value'],  # Default value
                 style={
                     'width': '100%', 
                     'fontSize': '20px',  # Font size
@@ -668,7 +665,7 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select booking channels'
             ),
-        ], width=2),
+        ], width=3),
 
         dbc.Col([
             dcc.Dropdown(
@@ -682,7 +679,7 @@ app.layout = dbc.Container([
                 },
                 placeholder='Select room types'
             ),
-        ], width=2),
+        ], width=1),
 
         dbc.Col([
             dcc.Dropdown(
@@ -771,10 +768,9 @@ dcc.Tabs([
             id='checkbox-heatmap-filters',
             options=[
                 {'label': 'ADR > rate', 'value': 'show_markers_adr'},
-                {'label': 'Upgrades', 'value': 'upgrades'},
+                {'label': 'Possible Upgrades', 'value': 'upgrades'},
                 {'label': 'Discount', 'value': 'discount'},
-                {'label': 'Matching Rates', 'value': 'matched_rates'},
-
+                {'label': 'Matching Rates', 'value': 'matched_rates'}
             ],
             value=[],  # No checkbox selected initially
             inline=True,
@@ -808,9 +804,9 @@ dcc.Tabs([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),
             dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px', 'marginBottom': '10px'}), width=6),  # Set fixed height
             dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6),
-            dbc.Col(dcc.Graph(id='heatmap', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
+            dbc.Col(dcc.Graph(id='heatmap-graph', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
     
-        ], style={'marginbotton': '40px'}),  # Set fixed height),
+        ], style={'marginbotto': '40px'}),  # Set fixed height),
 
         
 
@@ -1461,7 +1457,6 @@ def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels,
 
     return new_line_chart_fig
 
-@cache.memoize()
 def query_database(hotel_id):
     # SQL query to get the data for the selected hotel ID
     query = """

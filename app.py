@@ -804,7 +804,7 @@ dcc.Tabs([
             dbc.Button('Toggle Heatmap', id='toggle-button', n_clicks=0),
             dbc.Col(dcc.Graph(id='heatmap1', style={'height': '800px', 'marginBottom': '10px'}), width=6),  # Set fixed height
             dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6),
-            dbc.Col(dcc.Graph(id='heatmap-graph', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
+            dbc.Col(dcc.Graph(id='heatmap', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
     
         ], style={'marginbotto': '40px'}),  # Set fixed height),
 

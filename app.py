@@ -10,8 +10,6 @@ from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
-import webbrowser
-import threading
 from flask_caching import Cache
 
 # Database connection details
@@ -646,7 +644,7 @@ app.layout = dbc.Container([
             dcc.Dropdown(
                 id='hotel-dropdown',
                 options=hotel_options,
-                value=hotel_options[0]['value'],  # Default value
+                value=6,  # Default value
                 style={
                     'width': '100%', 
                     'fontSize': '20px',  # Font size
@@ -1510,6 +1508,14 @@ def update_heatmap(hotel_id):
             x=df_pivot.columns,  # x-axis (rate_date)
             y=df_pivot.index,    # y-axis (report_date, now reversed)
             colorscale=custom_colorscale,  # Color scale
+            colorbar=dict(
+            title="Rate",
+            orientation='h',
+            x=0.5,
+            y=-0.2,
+            len=0.6,
+            thickness=15
+        ),
             showscale=True  # Display color bar scale
         )
 

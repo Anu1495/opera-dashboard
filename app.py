@@ -3,14 +3,15 @@ import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
+import pandas as pd
 import numpy as np
+import plotly.express as px
 from datetime import datetime
 from sqlalchemy import create_engine, text
 from flask import Flask
 import sqlalchemy
 import dash_bootstrap_components as dbc
 from waitress import serve # type: ignore
-from flask_caching import Cache
 
 # Database connection details
 db_host = 'hotelcloud-db-dev.cy9have47g8u.eu-west-2.rds.amazonaws.com'
@@ -49,8 +50,6 @@ server = Flask(__name__)
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 
-cache = Cache(app.server, config={'CACHE_TYPE': 'simple', 'CACHE_DEFAULT_TIMEOUT': 300})
-
 # Create a custom color scale to enhance color differentiation
 custom_colorscale = [
     [0, 'white'],
@@ -61,17 +60,15 @@ custom_colorscale = [
     [1, 'brown']
 ]
 
-@cache.memoize()
 def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorscale, selected_channels, checkbox_values, selected_discount_adjustments):
-    # Fill missing values and convert date columns to datetime format
     df.fillna({'booking_channel_name': 'Unknown'}, inplace=True)
     df['created_date'] = pd.to_datetime(df['created_date'])
     df['stay_date'] = pd.to_datetime(df['stay_date'])
     
-    # Apply channel filter
-    if selected_channels:
-        df = df[df['booking_channel_name'].isin(selected_channels)]
-    
+    # Generate a complete date range for the booking dates
+    complete_date_range = pd.date_range(start=df['created_date'].min(), end=df['created_date'].max())
+    complete_date_range_str = complete_date_range.strftime('%Y-%m-%d')
+
     # Aggregating data
     df_agg = df.groupby(['created_date', 'stay_date', 'booking_channel_name', 'rate_plan_code', 'exp_rate']).agg({
         'number_of_bookings': 'sum',
@@ -123,7 +120,7 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         aggfunc='sum'
     )
     
-        # Replace zeros in bookings_pivot with NaN to avoid division by zero
+    # Replace zeros in bookings_pivot with NaN to avoid division by zero
     bookings_pivot_replaced = bookings_pivot.replace(0, np.nan)
 
     # Calculate average revenue per booking while handling NaNs
@@ -431,16 +428,17 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         yaxis_title='Stay Date',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        height=900,  # Adjust height if needed
+        height=900,
         xaxis=dict(
             title='Created Date',
-            tickformat='%Y-%m-%d'         
+            tickformat='%Y-%m-%d'  
         ),
         yaxis=dict(
             title='Stay Date',
             tickformat='%Y-%m-%d'
-        ),  # Adjust margins for space, especially if colorbar is below
+        ),
     )
+
 
     revenue_fig.update_layout(
         title={
@@ -478,19 +476,19 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         height=900,
         xaxis=dict(
             title='Created Date',
-            tickformat='%Y-%m-%d'        
+            tickformat='%Y-%m-%d'  
         ),
         yaxis=dict(
             title='Stay Date',
-            tickformat='%Y-%m-%d' 
+            tickformat='%Y-%m-%d'
         ),
-        showlegend=False
     )
+
 
 
     return booking_fig, revenue_fig, rate_fig
 
-@cache.memoize()
+
 def fetch_booking_details(stay_date, created_date, selected_hotel, selected_channels, selected_rooms, selected_rate_plan, selected_booking_status, selected_company, selected_nights):
     channel_filter = f"AND booking_channel_name IN ({', '.join(f'\'{channel}\'' for channel in selected_channels)})" if selected_channels else ""
     room_filter = f"AND name IN ({', '.join(f'\'{room}\'' for room in selected_rooms)})" if selected_rooms else ""
@@ -513,73 +511,18 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     """
     
     return pd.read_sql_query(detail_query, engine)
-@cache.memoize()
+
 # Define the bar chart for booking channels
 def fetch_data_with_sql_query(selected_hotel, stay_date):
     # Define the SQL query using parameterized placeholders
     sql_query = text("""
-    WITH aggregated_data AS (
-        SELECT
-            dt."date" AS stay_date,
-            h."name" AS hotel_name,
-            b.created_date::date AS created_date, 
-            EXTRACT(DAY FROM (dt."date" - b.created_date::date)) AS date_difference,
-            h.hotel_id,
-            b.booking_channel_name,
-            b.booking_status, 
-            r."name" AS room_name,
-            b.rate_plan_code,
-            COUNT(b.booking_reference) AS number_of_bookings,
-            SUM(COALESCE(br.total_revenue, b.total_revenue / (CASE WHEN b.nights=0 THEN 1 ELSE b.nights END))) AS total_revenue
-        FROM
-            booking b
-        JOIN
-            hotel h ON b.hotel_id = h.hotel_id
-        JOIN 
-            room r ON b.room_id = r.room_id
-        JOIN 
-            caldate dt ON b.check_in <= dt."date" 
-            AND ((b.check_out > dt."date") OR ((b.check_in = b.check_out) AND (dt."date" = b.check_in)))
-        LEFT OUTER JOIN 
-            booking_rate br ON b.booking_id = br.booking_rate_id
-        WHERE
-            dt."date" = :stay_date
-            AND b.hotel_id = :selected_hotel AND b.booking_status = 'CheckedOut'
-        GROUP BY
-            dt."date",
-            b.created_date::date,
-            h.name,
-            h.hotel_id,
-            b.rate_plan_code,
-            b.booking_status,
-            b.booking_channel_name,
-            r."name"
-    )
-    SELECT
-        stay_date,
-        hotel_name,
-        created_date,
-        hotel_id,
-        booking_channel_name, 
-        date_difference,
-        booking_status,
-        room_name,
-        rate_plan_code,
-        number_of_bookings,
-        total_revenue,
-        SUM(number_of_bookings) OVER (
-            PARTITION BY stay_date, booking_status
-            ORDER BY created_date
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS cumulative_bookings
-    FROM
-        aggregated_data
-    ORDER BY
-        hotel_id, stay_date, created_date;
+    SELECT *
+    FROM aggdata
+    WHERE hotel_id = :hotel_id AND stay_date = :stay_date
     """)
     
     # Execute the query using parameters
-    return pd.read_sql_query(sql_query, engine, params={"stay_date": stay_date, "selected_hotel": selected_hotel})
+    return pd.read_sql_query(sql_query, engine, params={"stay_date": stay_date, "hotel_id": selected_hotel})
 
 # Layout of the Dash app
 app.layout = dbc.Container([
@@ -814,12 +757,12 @@ dcc.Tabs([
             dbc.Col(dcc.Graph(id='heatmap2', style={'height': '800px'}), width=6),
             dbc.Col(dcc.Graph(id='heatmap', style={'height': '800px', 'marginTop': '80px', 'marginBottom': '30px'}), width=6)
     
-        ], style={'marginbotto': '40px'}),  # Set fixed height),
+        ], style={'marginbottom': '40px'}),  # Set fixed height),
 
         
 
         dbc.Row([ html.H2('Booking Trend'),
-            dbc.Col(dcc.Graph(id='line-chart', style={'height': '600px', 'marginTop': '80px'}), width=12)
+            dbc.Col(dcc.Graph(id='line-chart', style={'height': '600px', 'marginTop': '80px', 'marginBottom': '150px'}), width=12)
         ], style={'marginTop': '100px', 'marginBottom': '80px'}),  # Set fixed height
 
         # Booking Details Section
@@ -848,6 +791,7 @@ dcc.Tabs([
                             {'name': 'Check-in Date', 'id': 'check_in'},
                             {'name': 'Check-out Date', 'id': 'check_out'},
                             {'name': 'Rate Plan', 'id': 'rate_plan_code'},
+                            {'name': 'Company', 'id': 'company_name'},
                         ],
                         style_table={'overflowX': 'auto', 'fontSize': 14},
                         style_cell={'textAlign': 'left', 'padding': '5px', 'padding-right': '10px', 'fontSize': '18px'},
@@ -862,7 +806,7 @@ dcc.Tabs([
                     )
                 ]
             )
-        ], style={'width': '100%', 'padding': '10px', 'marginTop': '120px'}),
+        ], style={'width': '100%', 'padding': '10px', 'marginTop': '50px'}),
 
         # Additional Booking Details Section
         html.Div([
@@ -907,11 +851,19 @@ dcc.Tabs([
     ),
 
         dcc.Tab(
-    label='Pickup Curve', 
+    label='Corporate',
     children=[
         dbc.Row([
             dbc.Col([
-                html.Div("Select Stay Date for Line Chart:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'fontSize': '20px', 'fontFamily': 'Arial'}),
+                html.Div(
+                    "Select Stay Date:",
+                    style={
+                        'fontWeight': 'bold',
+                        'marginBottom': '5px',
+                        'fontSize': '20px',
+                        'fontFamily': 'Arial'
+                    }
+                ),
                 dcc.DatePickerSingle(
                     id='line-chart-stay-date-picker',
                     date='2024-01-01',  # Default date
@@ -920,11 +872,99 @@ dcc.Tabs([
                 )
             ], width=3),
 
-            dbc.Col(dcc.Graph(id='new-line-chart', style={'height': '600px'}), width=12),  # Set fixed height
-        ])
+            # dbc.Col(
+            #     dcc.Graph(id='new-line-chart', style={'height': '600px'}), width=9
+            # )
+        ]),
+
+        dbc.Row([
+    dbc.Col([
+        html.Div([
+            # Filtered Company Summary Table
+            dash_table.DataTable(
+        id='filtered-company-summary-table',
+        columns=[
+            {'name': 'Company Name', 'id': 'company_name'},
+            {'name': 'Total Bookings', 'id': 'total_bookings'},
+            {'name': 'Total Revenue', 'id': 'total_revenue'}
+        ],
+        data=[],  # Populated from callback
+        row_selectable='single',
+        selected_rows=[],
+        style_table={'marginTop': '20px'},
+        style_cell={'textAlign': 'left'},
+        style_header={'fontWeight': 'bold'}
+    ),
+
+    html.Hr(),  # Optional separator
+
+    # Detailed Booking Table for Selected Company in Filtered Summary Table
+    html.H3("Detailed Booking Information for Selected Company (Filtered Summary)"),
+    dash_table.DataTable(
+        id='summary-detailed-booking-table',
+        columns=[
+            {'name': 'Booking Reference', 'id': 'booking_reference'},
+            {'name': 'Check In', 'id': 'check_in'},
+            {'name': 'Check Out', 'id': 'check_out'},
+            {'name': 'Room Name', 'id': 'room_name'},
+            {'name': 'Rate Plan Code', 'id': 'rate_plan_code'},
+            {'name': 'Total Revenue', 'id': 'total_revenue'},
+            {'name': 'Booking Channel', 'id': 'booking_channel_name'}
+        ],
+        data=[],  # Populated when a company is selected in the summary table
+        style_table={'marginTop': '20px'},
+        style_cell={'textAlign': 'left'},
+        style_header={'fontWeight': 'bold'}
+    ),
+
+    html.Hr(),  # Optional separator between tables
+
+    # Complete Company Bookings Table
+    html.H3("Complete Company Bookings"),
+    dash_table.DataTable(
+        id='complete-company-bookings-table',
+        columns=[
+            {'name': 'Company Name', 'id': 'company_name'},
+            {'name': 'Total Bookings', 'id': 'total_bookings'},
+            {'name': 'Total Revenue', 'id': 'total_revenue'}
+        ],
+        data=[],  # Populated from callback
+        row_selectable='single',
+        selected_rows=[],
+        style_table={'marginTop': '20px'},
+        style_cell={'textAlign': 'left'},
+        style_header={'fontWeight': 'bold'}
+    ),
+
+    html.Hr(),  # Optional separator between tables
+
+    # Detailed Booking Table for Selected Company in Complete Bookings Table
+    html.H3("Detailed Booking Information for Selected Company (Complete Bookings)"),
+    dash_table.DataTable(
+        id='detailed-booking-table',
+        columns=[
+            {'name': 'Booking Reference', 'id': 'booking_reference'},
+            {'name': 'Check In', 'id': 'check_in'},
+            {'name': 'Check Out', 'id': 'check_out'},
+            {'name': 'Room Name', 'id': 'room_name'},
+            {'name': 'Rate Plan Code', 'id': 'rate_plan_code'},
+            {'name': 'Total Revenue', 'id': 'total_revenue'},
+            {'name': 'Booking Channel', 'id': 'booking_channel_name'}
+        ],
+        data=[],  # Populated based on selected company
+        style_table={'marginTop': '20px'},
+        style_cell={'textAlign': 'left'},
+        style_header={'fontWeight': 'bold'}
+    ),
+
+])
+    ], width=12)
+])
+
     ],
     style={'fontSize': '20px', 'fontFamily': 'Arial'}  # Set font size and family for the tab label
 ),
+
 dcc.Tab(
     label='Market Competitors', 
     children=[
@@ -977,7 +1017,6 @@ dcc.Tab(
      Input('sub-checkbox-discount-filters', 'value')]
 )
 
-@cache.memoize()
 def update_output(selected_hotel, selected_channels, selected_rooms, active_cell, table_data, selected_rate_plan, selected_booking_status, stay_date_start, stay_date_end, created_date_start, created_date_end, n_clicks, booking_relayout, revenue_relayout, rate_relayout, booking_click_data, revenue_click_data, rate_click_data, selected_company, selected_nights, checkbox_values, selected_discount_adjustments):
     # Default values
     booking_heatmap = go.Figure()
@@ -1370,106 +1409,114 @@ def update_output(selected_hotel, selected_channels, selected_rooms, active_cell
     return fig1, fig2, booking_details_data, bar_chart_fig, line_chart_fig, channel_options, additional_data, room_options, rate_options, book_options, company_options, nights_options, sub_checklist_style
 
 @app.callback(
-    Output('new-line-chart', 'figure'),
+    [Output('filtered-company-summary-table', 'data'),
+     Output('complete-company-bookings-table', 'data')],
     [Input('hotel-dropdown', 'value'),
-     Input('line-chart-stay-date-picker', 'date'),
-     Input('channel-dropdown', 'value'),
-     Input('rate-dropdown', 'value'),]  # Add rate dropdown input
+     Input('line-chart-stay-date-picker', 'date')]
 )
+def update_new_line_chart(selected_hotel, selected_stay_date):
+    if not selected_hotel:
+        return [], []
 
-@cache.memoize()
-def update_new_line_chart(selected_hotel, selected_stay_date, selected_channels, selected_rate_plan):
-    # Check if stay date and hotel are selected
-    if not selected_stay_date or not selected_hotel:
-        return go.Figure()
+    # Define the parameterized query for fetching company summary data from operadashboard1
+    company_summary_query = text("""
+        SELECT company_name, SUM(number_of_bookings) as total_bookings, SUM(total_revenue) as total_revenue
+        FROM public.operadashboard1
+        WHERE hotel_id = :hotel_id AND stay_date = :stay_date AND company_name IS NOT NULL AND company_name != ''
+        GROUP BY company_name
+        ORDER BY total_bookings DESC, total_revenue DESC;
+        """)
 
-    # Fetch data using the provided SQL query function
-    new_line_chart_data = fetch_data_with_sql_query(selected_hotel, selected_stay_date)
+    # Fetch summarized data for the selected hotel and stay date
+    company_summary_data = pd.read_sql_query(company_summary_query, engine, params={
+        "hotel_id": selected_hotel,
+        "stay_date": selected_stay_date
+    })
+    company_summary_table_data = company_summary_data.to_dict('records')
 
-    # Filter data based on selected stay date and hotel
-    filtered_data = new_line_chart_data[
-        (new_line_chart_data['stay_date'] == selected_stay_date) &
-        (new_line_chart_data['hotel_id'] == selected_hotel)
-    ]
+    # Define a query for complete company bookings with non-null company names
+    complete_booking_query = text("""
+   SELECT company_name, SUM(number_of_bookings) as total_bookings, SUM(total_revenue) as total_revenue
+        FROM public.operadashboard1
+        WHERE hotel_id = :hotel_id AND company_name IS NOT NULL AND company_name != ''
+        GROUP BY company_name
+        ORDER BY total_bookings DESC, total_revenue DESC;
+    """)
 
-    # Further filter data based on selected channels and rate plan if any
-    if selected_channels:
-        filtered_data = filtered_data[filtered_data['booking_channel_name'].isin(selected_channels)]
-    
-    if selected_rate_plan:
-        filtered_data = filtered_data[filtered_data['rate_plan_code'].isin(selected_rate_plan)]
+    # Fetch complete bookings data for the selected hotel
+    complete_booking_data = pd.read_sql_query(complete_booking_query, engine, params={"hotel_id": selected_hotel})
+    complete_company_table_data = complete_booking_data.to_dict('records')
 
-    # Initialize the figure
-    new_line_chart_fig = go.Figure()
+    return company_summary_table_data, complete_company_table_data
 
-    # Define axis labels based on selected filters
-    x_axis_label = 'Lead In'
-    y_axis_label = 'Cumulative Bookings'
-    
-    if selected_channels:
-        x_axis_label = 'Date Difference'  # Example, adjust based on context
-        y_axis_label = 'Bookings by Channel'  # Example, adjust based on context
-    
-    if selected_rate_plan:
-        x_axis_label = 'Rate Plan'  # Example, adjust based on context
-        y_axis_label = 'Bookings by Rate Plan'  # Example, adjust based on context
 
-    # If channels are selected, plot separate lines for each channel
-    if selected_channels:
-        for channel in selected_channels:
-            channel_data = filtered_data[filtered_data['booking_channel_name'] == channel]
-            new_line_chart_fig.add_trace(go.Scatter(
-                x=channel_data['date_difference'],
-                y=channel_data['cumulative_bookings'],
-                mode='lines+markers',
-                line=dict(width=2, shape='spline'),
-                fill='tozeroy',
-                marker=dict(size=10),
-                name=channel  # Channel name for legend
-            ))
-    else:
-        # Plot a single line if no channels are selected
-        new_line_chart_fig.add_trace(go.Scatter(
-            x=filtered_data['date_difference'],
-            y=filtered_data['cumulative_bookings'],
-            mode='lines+markers',
-            fill='tozeroy',
-            line=dict(color='blue', shape='spline'),
-            marker=dict(size=10),
-            name='Overall Bookings'
-        ))
+def fetch_data_with_sql_query(selected_hotel, stay_date):
+    # Define the SQL query using parameterized placeholders
+    sql_query = text("""
+    SELECT company_name, booking_reference, check_in, check_out, room_name, rate_plan_code,
+           total_revenue, booking_channel_name
+    FROM public.operadashboard1
+    WHERE hotel_id = :hotel_id AND stay_date = :stay_date AND company_name IS NOT NULL
+    """)
 
-    new_line_chart_fig.update_layout(
-        title={
-            'text': f'Pickup Curve for Stay Date {selected_stay_date}',
-            'font': {'size': 20, 'color': 'black', 'family': 'Arial', 'weight': 'bold'},
-            'x': 0.5,
-            'xanchor': 'center'
-        },
-        xaxis_title=x_axis_label,
-        yaxis_title=y_axis_label,
-        template='plotly_white',
-        xaxis=dict(
-            tickformat="%d",
-            tickangle=45,
-            title_font=dict(size=18),  # Font size for x-axis title
-            tickfont=dict(size=18),    # Font size for x-axis labels
-            autorange='reversed'  # Reverse the x-axis
-        ),
-        yaxis=dict(
-            tickformat=",.0f",
-            title_font=dict(size=18),  # Font size for y-axis title
-            tickfont=dict(size=18)     # Font size for y-axis labels
-        ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        margin=dict(l=50, r=50, b=50, t=50, pad=4),
-        height=1000,
-    )
+    # Execute the query with specified parameters
+    return pd.read_sql_query(sql_query, engine, params={"stay_date": stay_date, "hotel_id": selected_hotel})
 
-    return new_line_chart_fig
+@app.callback(
+    Output('detailed-booking-table', 'data'),
+    Input('complete-company-bookings-table', 'selected_rows'),
+    Input('complete-company-bookings-table', 'data')
+)
+def update_detailed_booking_table(selected_rows, company_bookings_data):
+    if selected_rows is None or not selected_rows:
+        return []
 
-@cache.memoize()
+    # Get the selected company name
+    selected_company = company_bookings_data[selected_rows[0]]['company_name']
+
+    # SQL query to fetch detailed bookings for the selected company
+    detailed_booking_query = text("""
+    SELECT booking_reference, check_in, check_out, room_name, rate_plan_code,
+           total_revenue, booking_channel_name
+    FROM public.operadashboard1
+    WHERE company_name = :company_name AND company_name IS NOT NULL
+    """)
+
+    # Execute the query with the selected company name
+    detailed_booking_data = pd.read_sql_query(detailed_booking_query, engine, params={"company_name": selected_company})
+    detailed_booking_table_data = detailed_booking_data.to_dict('records')
+    return detailed_booking_table_data
+
+# Callback to update the detailed booking table based on the selected company in company summary table
+@app.callback(
+    Output('summary-detailed-booking-table', 'data'),
+    [Input('filtered-company-summary-table', 'selected_rows'),
+     Input('filtered-company-summary-table', 'data'),
+     Input('line-chart-stay-date-picker', 'date')]
+)
+def update_summary_detailed_booking_table(selected_rows, summary_table_data, selected_stay_date):
+    if selected_rows is None or not selected_rows or selected_stay_date is None:
+        return []
+
+    # Get the selected company name
+    selected_company = summary_table_data[selected_rows[0]]['company_name']
+
+    # SQL query to fetch detailed bookings for the selected company and stay date
+    detailed_booking_query = text("""
+    SELECT booking_reference, check_in, check_out, room_name, rate_plan_code,
+           total_revenue, booking_channel_name
+    FROM public.operadashboard1
+    WHERE company_name = :company_name AND stay_date = :stay_date AND company_name IS NOT NULL
+    """)
+
+    # Execute the query with the selected company name and stay date
+    detailed_booking_data = pd.read_sql_query(detailed_booking_query, engine, params={
+        "company_name": selected_company,
+        "stay_date": selected_stay_date
+    })
+    summary_detailed_booking_table_data = detailed_booking_data.to_dict('records')
+    return summary_detailed_booking_table_data
+
 def query_database(hotel_id):
     # SQL query to get the data for the selected hotel ID
     query = """
@@ -1489,7 +1536,7 @@ def query_database(hotel_id):
     [Input('hotel-dropdown', 'value')]
 )
 
-@cache.memoize()
+
 def update_heatmap(hotel_id):
     try:
         # Query the database (cached for better performance)

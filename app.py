@@ -123,10 +123,13 @@ def create_heatmaps(df, booking_title, revenue_title, rate_title, custom_colorsc
         aggfunc='sum'
     )
     
-    bookings_pivot_replaced = bookings_pivot.replace(0, pd.NA)
-    average_revenue_per_booking = revenue_pivot / bookings_pivot_replaced
+        # Replace zeros in bookings_pivot with NaN to avoid division by zero
+    bookings_pivot_replaced = bookings_pivot.replace(0, np.nan)
 
-    # Replace NaN values with 0 for the heatmap
+    # Calculate average revenue per booking while handling NaNs
+    average_revenue_per_booking = revenue_pivot.div(bookings_pivot_replaced)
+
+    # Fill any remaining NaN values in the result with 0 for the heatmap
     revenue_fig = average_revenue_per_booking.fillna(0)
 
     refundable_pivot = df_full.pivot_table(

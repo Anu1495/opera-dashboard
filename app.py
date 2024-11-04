@@ -1420,7 +1420,7 @@ def update_new_line_chart(selected_hotel, selected_stay_date):
 
     # Define the parameterized query for fetching company summary data from operadashboard1
     company_summary_query = text("""
-        SELECT company_name, SUM(number_of_bookings) as total_bookings, SUM(total_revenue) as total_revenue
+        SELECT company_name, count(distinct booking_reference) as total_bookings, SUM(total_revenue) as total_revenue
         FROM public.operadashboard1
         WHERE hotel_id = :hotel_id AND stay_date = :stay_date AND company_name IS NOT NULL AND company_name != ''
         GROUP BY company_name
@@ -1436,7 +1436,7 @@ def update_new_line_chart(selected_hotel, selected_stay_date):
 
     # Define a query for complete company bookings with non-null company names
     complete_booking_query = text("""
-   SELECT company_name, SUM(number_of_bookings) as total_bookings, SUM(total_revenue) as total_revenue
+   SELECT company_name, count(distinct booking_reference) as total_bookings, SUM(total_revenue) as total_revenue
         FROM public.operadashboard1
         WHERE hotel_id = :hotel_id AND company_name IS NOT NULL AND company_name != ''
         GROUP BY company_name

@@ -36,7 +36,7 @@ hotel_options = [{'label': row['name'], 'value': row['hotel_id']} for _, row in 
 # Query for initial data
 query = """
 SELECT hotel_id, room_name, exp_rate, rate_plan_code, first_name, last_name, company_name, created_date, booking_status, "name", booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
-FROM public.operadashboard1;
+FROM public.operadashboard;
 """
 df = pd.read_sql_query(query, engine)
 
@@ -498,7 +498,7 @@ def fetch_booking_details(stay_date, created_date, selected_hotel, selected_chan
     nights_filter = f"AND nights IN ({', '.join(f'\'{night}\'' for night in selected_nights)})" if selected_nights else ""
     detail_query = f"""
     SELECT hotel_id, room_name, exp_rate, rate_plan_code, first_name, last_name, company_name, created_date, booking_status, "name", booking_id, nights, report_date, booking_channel_name, stay_date, total_revenue, adultcount, number_of_bookings, refundable_rate1, refundable_rate, non_refundable_rate, cancel_date, booking_reference, check_in, check_out
-    FROM public.operadashboard1
+    FROM public.operadashboard
     WHERE created_date = '{created_date}'
             AND stay_date = '{stay_date}'
             AND hotel_id = {selected_hotel}

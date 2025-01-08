@@ -4,7 +4,7 @@ from waitress import serve
 # Initialize the Dash app
 app = Dash(__name__)
 
-# App layout
+# Layout for the app
 app.layout = html.Div([
     html.H1("Embedded Power BI Dashboard"),
     html.Iframe(
@@ -13,6 +13,9 @@ app.layout = html.Div([
     )
 ])
 
-if __name__ == '__main__':
-    # Run the app with Waitress
-    serve(app.server, host='0.0.0.0', port=8000)
+# Expose the server object for Gunicorn
+server = app.server
+
+# If running locally, use Waitress to serve the app
+if __name__ == "__main__":
+    serve(app.server, host="0.0.0.0", port=8000)

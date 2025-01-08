@@ -1,7 +1,10 @@
 from dash import Dash, html
+from waitress import serve
 
+# Initialize the Dash app
 app = Dash(__name__)
 
+# App layout
 app.layout = html.Div([
     html.H1("Embedded Power BI Dashboard"),
     html.Iframe(
@@ -10,5 +13,6 @@ app.layout = html.Div([
     )
 ])
 
-if __name__ == "__main__":
-    app.run_server(debug=True)
+if __name__ == '__main__':
+    # Run the app with Waitress
+    serve(app.server, host='0.0.0.0', port=8050)
